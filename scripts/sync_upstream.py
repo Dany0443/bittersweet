@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 import scrape_standings  # noqa: E402
+import fetch_portwatch  # noqa: E402
 
 BUCKETS = [
     "critical-linux",
@@ -105,10 +106,24 @@ def gh_json(args: list[str]):
             capture_output=True, text=True, timeout=60, check=True,
         ).stdout
         return json.loads(out) if out.strip() else None
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
         msg = getattr(exc, "stderr", "") or str(exc)
         print(f"  ! gh api {' '.join(args[:1])}: {msg.strip().splitlines()[0][:160]}", file=sys.stderr)
         return None
+
+
+def gh_items(endpoint: str, page_size: int = 100):
+    """Read every page; a failed page must never look like an empty feed."""
+    items = []
+    page = 1
+    while True:
+        batch = gh_json([f"{endpoint}&per_page={page_size}&page={page}"])
+        if not isinstance(batch, list):
+            return None
+        items.extend(batch)
+        if len(batch) < page_size:
+            return items
+        page += 1
 
 
 def triage(text: str) -> tuple[str, dict[str, int]]:
@@ -191,7 +206,7 @@ def collect(repo: dict, since: dt.datetime, pr_limit: int) -> dict:
     rid = repo["id"]
     meta = gh_json([f"repos/{rid}"])
     result = {"id": rid, "commits": [], "prs": [], "buckets": {b: 0 for b in BUCKETS},
-              "unclassified": 0, "hold": [], "notes": []}
+              "unclassified": 0, "hold": [], "notes": [], "collection_complete": False}
     if not meta:
         # A previously nuked repository stays nuked when GitHub still answers
         # 404; anything else is an outage to investigate.
@@ -206,17 +221,21 @@ def collect(repo: dict, since: dt.datetime, pr_limit: int) -> dict:
     if actual.lower() != rid.lower():
         result["renamed_to"] = actual
     if result.get("renamed_to"):
+        repo["renamed_to"] = actual
         repo["status"] = "renamed"
     elif meta.get("archived"):
         repo["status"] = "archived"
-    elif repo.get("status") == "nuked":
+    elif repo.get("status") in ("nuked", "unreachable"):
         # It came back: record the recovery instead of keeping a stale nuke.
         repo["status"] = "active"
         repo["restored_at"] = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
-    elif repo.get("status") == "candidate" and not repo.get("on_page"):
+    elif repo.get("status") == "candidate":
         repo["status"] = "candidate"
     else:
         repo["status"] = "active"
+    if (repo.get("portwatch") or {}).get("section") == "candidates":
+        # Reachability or a standings listing cannot vet a candidate.
+        repo["status"] = "candidate"
     repo["default_branch"] = meta.get("default_branch")
     lic = (meta.get("license") or {}).get("spdx_id")
     if lic and lic != "NOASSERTION":
@@ -228,12 +247,19 @@ def collect(repo: dict, since: dt.datetime, pr_limit: int) -> dict:
     if repo.get("archived"):
         repo["status"] = "archived"
 
+    if meta.get("private"):
+        result["notes"].append("private repository; public-source collection skipped")
+        result["collection_complete"] = False
+        return result
+
     branch = meta.get("default_branch") or "main"
-    commits = gh_json([
-        f"repos/{actual}/commits?sha={branch}&since={iso(since)}&per_page=100"
-    ]) or []
+    commits = gh_items(f"repos/{actual}/commits?sha={branch}&since={iso(since)}")
+    result["collection_errors"] = []
+    if commits is None:
+        result["collection_errors"].append("commits")
+        commits = []
     for c in commits:
-        msg = (c.get("commit", {}).get("message") or "").splitlines()[0]
+        msg = (c.get("commit", {}).get("message") or "").split("\n", 1)[0]
         sha = (c.get("sha") or "")[:12]
         bucket, _ = triage(msg)
         result["commits"].append({"sha": sha, "message": msg, "bucket": bucket,
@@ -243,23 +269,31 @@ def collect(repo: dict, since: dt.datetime, pr_limit: int) -> dict:
         else:
             result["buckets"][bucket] += 1
 
-    prs = gh_json([f"repos/{actual}/pulls?state=open&per_page={pr_limit}&sort=updated&direction=desc"]) or []
+    prs = gh_items(f"repos/{actual}/pulls?state=open&sort=updated&direction=desc", pr_limit)
+    if prs is None:
+        result["collection_errors"].append("prs")
+        prs = []
     for pr in prs:
         title = pr.get("title") or ""
-        bucket, _ = triage(title)
+        body = pr.get("body") or ""
+        bucket, _ = triage(title + "\n" + body)
         rec = {"number": pr.get("number"), "title": title, "bucket": bucket,
                "updated_at": pr.get("updated_at"), "draft": bool(pr.get("draft")),
-               "url": pr.get("html_url")}
+               "url": pr.get("html_url"), "head_sha": (pr.get("head") or {}).get("sha")}
         result["prs"].append(rec)
         if bucket == "unclassified":
             result["unclassified"] += 1
         else:
             result["buckets"][bucket] += 1
-        low = title.lower()
-        if any(m in low for m in HOLD_MARKERS):
+        low = (title + "\n" + body).lower()
+        if any(m in low for m in HOLD_MARKERS + ("timeout", "device loss", "device-lost", "device removed")):
             result["hold"].append({"kind": "pr", "id": pr.get("number"), "title": title})
 
-    result["pr_count_capped"] = len(prs) >= pr_limit
+    result["pr_count_capped"] = False
+    result["collection_complete"] = not result["collection_errors"]
+    repo["last_checked_at"] = iso(now_utc())
+    if not result["collection_complete"]:
+        return result
     if commits:
         repo["last_sync_sha"] = commits[0]["sha"]
     else:
@@ -280,11 +314,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--report", default=str(ROOT / "tracking" / "sync-report.json"))
     ap.add_argument("--changelog", default=str(ROOT / "tracking" / "CHANGELOG.md"))
     ap.add_argument("--remotes", default=str(ROOT / "scripts" / "remotes.txt"))
-    ap.add_argument("--since", help="ISO timestamp; defaults to the manifest's window")
+    ap.add_argument("--since", help="ISO timestamp; defaults to the current UTC day")
     ap.add_argument("--offline-page", help="use a saved HTML page instead of fetching")
     ap.add_argument("--no-api", action="store_true", help="discovery only, skip GitHub calls")
-    ap.add_argument("--pr-limit", type=int, default=100)
+    ap.add_argument("--pr-limit", type=int, default=100,
+                    help="PR page size (1-100); all pages are collected")
+    ap.add_argument("--offline-portwatch", type=Path, help="use a saved PortWatch feed")
     args = ap.parse_args(argv)
+    if not 1 <= args.pr_limit <= 100:
+        ap.error("--pr-limit must be between 1 and 100")
+    if args.offline_page and not args.offline_portwatch:
+        ap.error("--offline-page requires --offline-portwatch to keep both sources offline")
 
     stamp = iso(now_utc())
     manifest_path = Path(args.manifest)
@@ -303,6 +343,17 @@ def main(argv: list[str]) -> int:
     Path(args.snapshot).write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
 
     discovered = discover(manifest, snapshot, stamp)
+    tracker = (json.loads(args.offline_portwatch.read_text(encoding="utf-8"))
+               if args.offline_portwatch else fetch_portwatch.fetch(fetch_portwatch.SOURCE))
+    found = fetch_portwatch.normalise(tracker)
+    _, updated, new_ids = fetch_portwatch.merge(manifest, found)
+    discovered.extend(r for r in found if r["id"] in new_ids)
+    raw = {k: v for k, v in tracker.items() if k not in ("headlines", "ignored")}
+    raw["ignored_count"] = len(tracker.get("ignored", []))
+    # Keep custom/test manifests isolated from the checkout's live tracking files.
+    portwatch_dir = Path(args.snapshot).parent
+    (portwatch_dir / "portwatch.json").write_text(json.dumps(raw, ensure_ascii=False, indent=1) + "\n")
+    (portwatch_dir / "PORTWATCH.md").write_text(fetch_portwatch.digest(tracker, found, new_ids, updated))
 
     # Merge the page's current position/stage into every tracked entry and
     # mark entries that the page no longer lists.
@@ -346,7 +397,8 @@ def main(argv: list[str]) -> int:
             results.append(collect(repo, since, args.pr_limit))
     else:
         results = [{"id": r["id"], "commits": [], "prs": [],
-                    "buckets": {b: 0 for b in BUCKETS}, "unclassified": 0, "hold": []}
+                    "buckets": {b: 0 for b in BUCKETS}, "unclassified": 0, "hold": [],
+                    "collection_complete": False, "notes": ["GitHub collection skipped (--no-api)"]}
                    for r in manifest["repos"]]
 
     totals = {b: sum(r["buckets"].get(b, 0) for r in results) for b in BUCKETS}
@@ -355,15 +407,19 @@ def main(argv: list[str]) -> int:
         "schema": 1,
         "generated_at": stamp,
         "source": scrape_standings.SOURCE,
+        "sources": [scrape_standings.SOURCE, fetch_portwatch.SOURCE],
         "window_since": iso(since),
         "repo_count": len(manifest["repos"]),
+        "api_skipped": args.no_api,
         "new_repositories": discovered,
         "renamed": [{"id": r["id"], "to": r.get("renamed_to")} for r in results if r.get("renamed_to")],
         "unreachable": [r["id"] for r in results if r.get("status") == "unreachable"],
         "totals": totals,
         "per_repo": results,
     }
-    Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    # Full pagination can produce thousands of PR records. Compact JSON keeps
+    # the complete dataset within the existing tracking-file policy ceiling.
+    Path(args.report).write_text(json.dumps(report, separators=(",", ":"), sort_keys=True) + "\n")
 
     manifest["generated_at"] = stamp
     manifest["repo_count"] = len(manifest["repos"])
@@ -371,7 +427,7 @@ def main(argv: list[str]) -> int:
 
     lines = []
     for r in manifest["repos"]:
-        if r.get("base"):
+        if r.get("base") or r.get("status") in ("nuked", "takedown", "offline", "unreachable"):
             continue
         lines.append(f"{r['id']}\thttps://github.com/{r['id']}.git")
     Path(args.remotes).write_text("\n".join(lines) + "\n")
@@ -379,13 +435,13 @@ def main(argv: list[str]) -> int:
     write_changelog(Path(args.changelog), report, manifest, since)
     print(f"tracked={len(manifest['repos'])} new={len(discovered)} "
           f"totals={totals}", file=sys.stderr)
-    return 0
+    return 1 if report["unreachable"] or any(r.get("collection_errors") for r in results) else 0
 
 
 def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime) -> None:
     by_id = {r["id"]: r for r in manifest["repos"]}
     out = [f"# Upstream sync — {report['generated_at']}", "",
-           f"Source: <{report['source']}>  ",
+           f"Sources: " + ", ".join(f"<{source}>" for source in report.get("sources", [report["source"]])),
            f"Window: commits since `{report['window_since']}`  ",
            f"Tracked repositories: **{report['repo_count']}**", ""]
 
@@ -397,6 +453,13 @@ def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime
     else:
         out.append("_None: the manifest already covered every public link on the page._")
     out.append("")
+
+    incomplete = [r for r in report["per_repo"] if r.get("collection_errors")]
+    if incomplete:
+        out += ["## Incomplete API collection", ""]
+        out += [f"- `{r['id']}`: {', '.join(r['collection_errors'])}; sync checkpoint preserved"
+                for r in incomplete]
+        out.append("")
 
     if report["renamed"]:
         out += ["## Renamed or moved", ""]

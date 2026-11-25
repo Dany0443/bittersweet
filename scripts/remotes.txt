@@ -4,7 +4,6 @@ Ahmet-Dedeler/rage9-re	https://github.com/Ahmet-Dedeler/rage9-re.git
 Albotterin/AWC_from_RPF9_Extractor	https://github.com/Albotterin/AWC_from_RPF9_Extractor.git
 anrq0/SeriesX-Emulator	https://github.com/anrq0/SeriesX-Emulator.git
 Archivist-Atlas/gta-vi-astral	https://github.com/Archivist-Atlas/gta-vi-astral.git
-batatinhafcbatatinha-pixel/xseriesrecomp	https://github.com/batatinhafcbatatinha-pixel/xseriesrecomp.git
 Belobug/VIctory-Belobug-AMD	https://github.com/Belobug/VIctory-Belobug-AMD.git
 boykopovar/AnyPS5	https://github.com/boykopovar/AnyPS5.git
 brcly/TuxBox	https://github.com/brcly/TuxBox.git
@@ -12,8 +11,8 @@ breadbbbb/rpf9-explorer	https://github.com/breadbbbb/rpf9-explorer.git
 californiaAlmonds/OpenScarlett	https://github.com/californiaAlmonds/OpenScarlett.git
 cocainebunnylaboratories/cblvictoryvi	https://github.com/cocainebunnylaboratories/cblvictoryvi.git
 daeken/XSXEmu	https://github.com/daeken/XSXEmu.git
-Dark3581/AnyBox	https://github.com/Dark3581/AnyBox.git
 DexNom/VIctory	https://github.com/DexNom/VIctory.git
+edsuuu/VI-BR-PORT	https://github.com/edsuuu/VI-BR-PORT.git
 edupode/anyxboxseries	https://github.com/edupode/anyxboxseries.git
 ethan00013/keylime	https://github.com/ethan00013/keylime.git
 fablinoo/kelvaroq	https://github.com/fablinoo/kelvaroq.git
@@ -40,6 +39,7 @@ kry-vex-gta/XBOX-Inspector	https://github.com/kry-vex-gta/XBOX-Inspector.git
 Librett0/vice-lens	https://github.com/Librett0/vice-lens.git
 ljm-233/Xbgtasix	https://github.com/ljm-233/Xbgtasix.git
 LooperSalty/AnyXboxX	https://github.com/LooperSalty/AnyXboxX.git
+LoverCatys/ruff-lab	https://github.com/LoverCatys/ruff-lab.git
 luizwidmer/palmetto	https://github.com/luizwidmer/palmetto.git
 lynxnathan/rage-tools-vi	https://github.com/lynxnathan/rage-tools-vi.git
 marvisak/VIctory	https://github.com/marvisak/VIctory.git
@@ -48,13 +48,11 @@ mewiof/Holy-Interoperability	https://github.com/mewiof/Holy-Interoperability.git
 mkr2tl/xenstride-public	https://github.com/mkr2tl/xenstride-public.git
 myokex/victory-amd	https://github.com/myokex/victory-amd.git
 nineforge0/forge9	https://github.com/nineforge0/forge9.git
-nullbrik/RageForge	https://github.com/nullbrik/RageForge.git
 omonkeyz/xbox-emulator	https://github.com/omonkeyz/xbox-emulator.git
 OnlyMoisties/GTA6-BootTest	https://github.com/OnlyMoisties/GTA6-BootTest.git
 OpenCommunityEdition/OpenScarlett	https://github.com/OpenCommunityEdition/OpenScarlett.git
 p-portela/SCARAB	https://github.com/p-portela/SCARAB.git
 pablogonz12/Scarlight	https://github.com/pablogonz12/Scarlight.git
-PastiiJay/klbf-lab	https://github.com/PastiiJay/klbf-lab.git
 pragyaangaur/VIctory-macOS	https://github.com/pragyaangaur/VIctory-macOS.git
 ProhorovIlja/NativeX-Runtime	https://github.com/ProhorovIlja/NativeX-Runtime.git
 R0Y00/Xbox2Windows	https://github.com/R0Y00/Xbox2Windows.git
@@ -79,5 +77,4 @@ Wertrex/Americas	https://github.com/Wertrex/Americas.git
 woreksami/ttpf-studio	https://github.com/woreksami/ttpf-studio.git
 xcl-dev/xcl	https://github.com/xcl-dev/xcl.git
 ZigZagBoi1/ScarlettPort	https://github.com/ZigZagBoi1/ScarlettPort.git
-zohaiblazuli/GrandTheftXbox	https://github.com/zohaiblazuli/GrandTheftXbox.git
 ZSlayerHQ/victory-world-runtime	https://github.com/ZSlayerHQ/victory-world-runtime.git
