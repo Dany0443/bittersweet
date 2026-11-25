@@ -10,3 +10,5 @@ pub mod vram;
 pub mod paths;
 
 pub mod logging;
+
+pub mod pipeline;
