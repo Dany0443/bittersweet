@@ -237,7 +237,7 @@ def digest(tracker: dict, found: list[dict], new_ids: list[str], updated: int) -
     for tool in tools:
         out.append(f"- `{tool['id']}` - {tool['description']}")
     out.append("")
-    return "\n".join(out)
+    return "\n".join(line.rstrip() for line in out)
 
 
 def main() -> int:

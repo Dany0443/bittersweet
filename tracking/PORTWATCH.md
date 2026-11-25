@@ -1,8 +1,8 @@
 # PortWatch VI digest
 
-Source: <https://portwatch-vi.xyz/>  
-Tracker data updated: `2026-11-25T16:22:16.626Z`  
-Fetched: `2026-11-25T18:32:47+00:00`
+Source: <https://portwatch-vi.xyz/>
+Tracker data updated: `2026-11-25T19:48:37.000Z`
+Fetched: `2026-11-25T19:50:52+00:00`
 
 PortWatch is an independent fan tracker. Its news headlines are quoted here for the record; product and company names belong to their owners. `candidates` are unreviewed and are never presented as trusted.
 
@@ -10,9 +10,9 @@ PortWatch is an independent fan tracker. Its news headlines are quoted here for 
 
 | Section | Repositories |
 |---|---:|
-| Efforts (vetted) | 35 |
+| Efforts (vetted) | 36 |
 | Tools (vetted) | 22 |
-| Candidates (unreviewed) | 14 |
+| Candidates (unreviewed) | 1 |
 | Nuked or removed | 3 |
 | New to this manifest | 0 |
 | Records refreshed | 0 |
@@ -31,26 +31,26 @@ None: every vetted repository was already tracked.
 
 ## Recent changes
 
-- **2026-11-25** (up): ZETTROX almost never crashes: its README reports 1 h 30 min+ without a crash, so its stability goes from 0.5 to 0.8 (“Rarely crashes”). Score 61.2% → 64.2%, still #1.
-- **2026-11-25** (claim): TuxBox's README may claim a new milestone (playable): “- GTA VI (ProjectScarlett) gets into the story intro on Linux with stock Proton Experimental. It isn’t playable yet: man”
-- **2026-11-25** (claim): AnyXboxX's README may claim a new milestone (perf): “- ✅ The Xbox Series 1.0.2.1 build of GTA VI launches on PC: boot, profile screen, first-run settings, legal screens, loa”
-- **2026-11-25** (new): Scout spotted edsuuu/VI-BR-PORT (possible effort, substance 98).
-- **2026-11-25** (new): Scout spotted idvwork/rebox (possible effort, substance 83).
-- **2026-11-25** (new): Scout spotted GuoqiFish/WelcomeToFlorida (possible effort, substance 43).
-- **2026-11-25** (new): Scout spotted TaynanGT/victory-windows (possible effort, substance 64).
-- **2026-11-25** (new): Scout spotted TaynanGT/victory-windows-anterior-20261125 (possible effort, substance 68).
-- **2026-11-25** (new): Scout spotted Leucodermique/VIce (possible effort, substance 90).
-- **2026-11-25** (new): Scout spotted DBWilliamEngineering/IraRationis (possible effort, substance 55).
-- **2026-11-25** (new): Scout spotted ka1qux/victory-ka1qux (possible effort, substance 74).
-- **2026-11-25** (new): Scout spotted Ybucaille/nativ64 (possible effort, substance 47).
-- **2026-11-25** (new): Scout spotted 7jycwjmbfn-eng/scenegate-vi (possible effort, substance 69).
-- **2026-11-25** (new): Scout spotted Joaco9020/mangrove (possible effort, substance 71).
-- **2026-11-25** (new): Scout spotted sleep10dev/XPORT (possible effort, substance 46).
-- **2026-11-25** (new): Scout spotted chvabalo-interactive/sludgemu (possible effort, substance 71).
+- **2026-11-25** (new): keylime joins the watchlist at Main menu (30%): its own C++ runtime reports GTA VI's menus at 30 fps on Vulkan. Its opening cutscene doesn't draw yet.
 - **2026-11-25** (new): Scout spotted natedemoss/vice-pc (possible effort, substance 58).
 - **2026-11-25** (new): Scout spotted daeken/XSXEmu (possible effort, substance 87).
 - **2026-11-25** (new): Scout spotted moonrelax/basalt (possible effort, substance 75).
 - **2026-11-25** (new): Scout spotted JoseArranzSanchez/GTA6_PCPORT_INFO (possible effort, substance 56).
+- **2026-11-25** (new): Scout spotted Guernica4u/GTA6-PC-Port-Archive (possible effort, substance 53).
+- **2026-11-25** (new): Scout spotted flipflapov/DSTN (possible effort, substance 88).
+- **2026-11-25** (new): Scout spotted Archivist-Atlas/gta-vi-astral (possible effort, substance 63).
+- **2026-11-25** (new): Scout spotted Yhozen/series-web (possible effort, substance 83).
+- **2026-11-25** (new): Scout spotted 4Sakens/Project-Kalaga (possible effort, substance 84).
+- **2026-11-25** (new): Scout spotted SixLauncher/VILauncher (possible effort, substance 87).
+- **2026-11-25** (new): Scout spotted airpiglabs/crouton (possible effort, substance 60).
+- **2026-11-25** (new): Scout spotted idvwork/6stars-gta-vi-engine (tool, substance 53).
+- **2026-11-25** (new): Scout spotted xcl-dev/xcl (possible effort, substance 98).
+- **2026-11-25** (new): Scout spotted vitutu1/victory-perf (possible effort, substance 98).
+- **2026-11-25** (new): Scout spotted jaylikesbunda/VIKit (possible effort, substance 63).
+- **2026-11-25** (new): Scout spotted GuoqiFish/WelcomeToFlorida (possible effort, substance 43).
+- **2026-11-25** (new): Scout spotted thealexsan/oathkeep (possible effort, substance 83).
+- **2026-11-25** (new): Scout spotted LukaManstein/CHIMERA (possible effort, substance 70).
+- **2026-11-25** (new): Scout spotted Scarlet-Noble/victory-mac (possible effort, substance 72).
 
 ## News
 

@@ -440,7 +440,7 @@ def main(argv: list[str]) -> int:
 
 def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime) -> None:
     by_id = {r["id"]: r for r in manifest["repos"]}
-    out = [f"# Upstream sync — {report['generated_at']}", "",
+    out = [f"# Upstream sync - {report['generated_at']}", "",
            f"Sources: " + ", ".join(f"<{source}>" for source in report.get("sources", [report["source"]])),
            f"Window: commits since `{report['window_since']}`  ",
            f"Tracked repositories: **{report['repo_count']}**", ""]
@@ -449,7 +449,7 @@ def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime
     if report["new_repositories"]:
         out += ["| Repository | Name | Family | Stage |", "|---|---|---|---|"]
         for r in report["new_repositories"]:
-            out.append(f"| [{r['id']}](https://github.com/{r['id']}) | {r['name']} | {r['family']} | {r.get('stage') or '—'} |")
+            out.append(f"| [{r['id']}](https://github.com/{r['id']}) | {r['name']} | {r['family']} | {r.get('stage') or '-'} |")
     else:
         out.append("_None: the manifest already covered every public link on the page._")
     out.append("")
@@ -507,10 +507,10 @@ def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime
         for r in report["per_repo"]:
             for pr in r["prs"]:
                 if pr["bucket"] == bucket:
-                    rows.append(f"- `{r['id']}` #{pr['number']} — {pr['title']}")
+                    rows.append(f"- `{r['id']}` #{pr['number']} - {pr['title']}")
             for c in r["commits"]:
                 if c["bucket"] == bucket:
-                    rows.append(f"- `{r['id']}` `{c['sha']}` — {c['message']}")
+                    rows.append(f"- `{r['id']}` `{c['sha']}` - {c['message']}")
         out += (rows[:80] if rows else ["_No items this window._"])
         if len(rows) > 80:
             out.append(f"- …and {len(rows) - 80} more (see `tracking/sync-report.json`)")
@@ -523,9 +523,9 @@ def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime
         prs = len(r["prs"])
         cap = "+" if r.get("pr_count_capped") else ""
         out.append(f"| `{r['id']}` | {len(r['commits'])} | {prs}{cap} | "
-                   f"{repo.get('stage') or '—'} | {repo.get('status', '—')} |")
+                   f"{repo.get('stage') or '-'} | {repo.get('status', '-')} |")
     out.append("")
-    path.write_text("\n".join(out) + "\n")
+    path.write_text("\n".join(line.rstrip() for line in out) + "\n")
 
 
 if __name__ == "__main__":

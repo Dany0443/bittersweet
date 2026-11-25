@@ -3,6 +3,7 @@ Ahmet-Dedeler/bcpack-rs	https://github.com/Ahmet-Dedeler/bcpack-rs.git
 Ahmet-Dedeler/rage9-re	https://github.com/Ahmet-Dedeler/rage9-re.git
 Albotterin/AWC_from_RPF9_Extractor	https://github.com/Albotterin/AWC_from_RPF9_Extractor.git
 anrq0/SeriesX-Emulator	https://github.com/anrq0/SeriesX-Emulator.git
+AntoninMichelq/VIctory-forkAMD	https://github.com/AntoninMichelq/VIctory-forkAMD.git
 Archivist-Atlas/gta-vi-astral	https://github.com/Archivist-Atlas/gta-vi-astral.git
 Belobug/VIctory-Belobug-AMD	https://github.com/Belobug/VIctory-Belobug-AMD.git
 boykopovar/AnyPS5	https://github.com/boykopovar/AnyPS5.git
@@ -29,7 +30,6 @@ jadeowaowa/scarlett-layer	https://github.com/jadeowaowa/scarlett-layer.git
 JamesCicada/GTAVI-Recomp	https://github.com/JamesCicada/GTAVI-Recomp.git
 JMAN730/project-flamingo	https://github.com/JMAN730/project-flamingo.git
 JoshRob297/rpf9-research	https://github.com/JoshRob297/rpf9-research.git
-JPTuba9/xlaunch-vi	https://github.com/JPTuba9/xlaunch-vi.git
 ka1qux/BRVIctory-ka1qux	https://github.com/ka1qux/BRVIctory-ka1qux.git
 Kajcsi/G6Recomp	https://github.com/Kajcsi/G6Recomp.git
 kellysix/kelly	https://github.com/kellysix/kelly.git
@@ -40,6 +40,7 @@ Librett0/vice-lens	https://github.com/Librett0/vice-lens.git
 ljm-233/Xbgtasix	https://github.com/ljm-233/Xbgtasix.git
 LooperSalty/AnyXboxX	https://github.com/LooperSalty/AnyXboxX.git
 LoverCatys/ruff-lab	https://github.com/LoverCatys/ruff-lab.git
+LowBacon/HybridGt	https://github.com/LowBacon/HybridGt.git
 luizwidmer/palmetto	https://github.com/luizwidmer/palmetto.git
 lynxnathan/rage-tools-vi	https://github.com/lynxnathan/rage-tools-vi.git
 marvisak/VIctory	https://github.com/marvisak/VIctory.git
@@ -70,7 +71,6 @@ TheoBIET/OpenVI	https://github.com/TheoBIET/OpenVI.git
 ubiquitarianism/leonida	https://github.com/ubiquitarianism/leonida.git
 uiliannn/VItoriaBr	https://github.com/uiliannn/VItoriaBr.git
 valouddsite/Xboxx	https://github.com/valouddsite/Xboxx.git
-vitutu1/victory-perf	https://github.com/vitutu1/victory-perf.git
 voidopcode/vilocity	https://github.com/voidopcode/vilocity.git
 walkthestars/GTA6-Asset-Info	https://github.com/walkthestars/GTA6-Asset-Info.git
 Wertrex/Americas	https://github.com/Wertrex/Americas.git
