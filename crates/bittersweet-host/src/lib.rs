@@ -8,3 +8,5 @@ pub mod gpu;
 pub mod vram;
 
 pub mod paths;
+
+pub mod logging;
