@@ -45,7 +45,7 @@ open issues or open pull requests through them. The normal update sequence is:
 python3 scripts/scrape_standings.py
 python3 scripts/fetch_portwatch.py
 python3 scripts/sync_upstream.py
-python3 scripts/sync_upstream.py --offline-page saved.html
+python3 scripts/sync_upstream.py --offline-page saved.html --offline-portwatch saved-tracker.json
 ```
 
 - `scrape_standings.py` writes `tracking/standings.json` and does not query
@@ -56,6 +56,12 @@ python3 scripts/sync_upstream.py --offline-page saved.html
 - `sync_upstream.py` queries repository metadata and PRs, then writes
   `tracking/sync-report.json`, `tracking/CHANGELOG.md`,
   `tracking/PORTWATCH.md`, and the manifest.
+- Every update cycle must refresh both feeds and collect all pages of
+  commits and open PRs for every public tracked repository. Automated
+  buckets are screening, not source review or proof that a port is safe.
+- Prioritize Linux/Proton forks, core aggregators, AMD forks, performance
+  forks, then independent toolchains. Review timeout/device-loss holds
+  before adapting code; keep proprietary/Windows-SDK work experimental.
 - Treat PortWatch `candidates` as unreviewed. Preserve active, renamed,
   unreachable, nuked and restored history instead of replacing records.
 - Triage commit and PR changes as `critical-linux`, `frame-time`, `stability`,
@@ -102,8 +108,20 @@ and verified. A successful build is not a successful run.
 
 ## Repository operations
 
-Do not push, force-push, commit or open or update a pull request unless the
-user explicitly asks. Otherwise, leave changes in the working tree.
+Commit each completed, verified feature and significant change separately.
+Use `type(scope): imperative description` for commit subjects, for example
+`fix(probe): prefer the discrete GPU`. Use the maintainer identity already
+configured in Git, work on `main`, and omit AI coauthor trailers. Do not
+create another branch for this repository.
+
+Do not push, force-push, or open or update a pull request unless the user
+explicitly asks.
+
+## Writing conventions
+
+Keep code comments minimal. Explain only non-obvious behavior or necessary
+provenance. Do not use em dashes in text you write, including code comments,
+documentation, commit messages, and chat replies.
 
 Do not run the tracking scripts as a substitute for validation unless the
 request is specifically to refresh upstream tracking. Those scripts contact
