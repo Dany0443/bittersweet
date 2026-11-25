@@ -135,6 +135,15 @@
       "reason": "Decode v_cmpx destinations as EXEC rather than encoded VDST. Preserve ordinary compare destinations.",
       "validation": "Regression failed before the port. Test both wave sizes and five encoded destinations; all 187 portable shader tests pass.",
       "pr": 30
+    },
+    {
+      "repo": "DexNom/VIctory",
+      "commit_sha": "4c9a1532034e30db7c54e9ce06ae7c5dcc9e5f2c",
+      "decision": "partial-port",
+      "feature": "Shader optimizer analysis reuse",
+      "reason": "Reuse function effects and dominator analysis between cleanup rounds, rebuilding the tree after control-flow pruning. The Windows memory-transfer changes are not included.",
+      "validation": "All 187 portable shader tests pass, including randomized optimizer equivalence checks. No frame-time measurement.",
+      "pr": 25
     }
   ]
 }

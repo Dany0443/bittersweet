@@ -112,3 +112,5 @@ All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 - Source-less VOP1 decoding, commit `496fc09e035b90dc77574a4e645f127ea3123cf8`, PR #30: Keep v_nop, v_pipeflush and v_clrexcp one dword even when unused fields resemble literal, SDWA or DPP extension markers.
 
 - VOP3 CMPX destination decoding, commit `496fc09e035b90dc77574a4e645f127ea3123cf8`, PR #30: Decode v_cmpx destinations as EXEC rather than encoded VDST. Preserve ordinary compare destinations.
+
+- Shader optimizer analysis reuse, commit `4c9a1532034e30db7c54e9ce06ae7c5dcc9e5f2c`, PR #25: Reuse function effects and dominator analysis between cleanup rounds, rebuilding the tree after control-flow pruning. The Windows memory-transfer changes are not included.
