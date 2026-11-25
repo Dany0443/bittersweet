@@ -116,3 +116,5 @@ All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 - Shader optimizer analysis reuse, commit `4c9a1532034e30db7c54e9ce06ae7c5dcc9e5f2c`, PR #25: Reuse function effects and dominator analysis between cleanup rounds, rebuilding the tree after control-flow pruning. The Windows memory-transfer changes are not included.
 
 - Pixel quad reads and quad-local DPP8, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Use native quad reads for pixel and mesh quad permutations, specialize broadcasts/exchanges, and reject DPP8 selections that cross pixel quads. Use quad-local EXEC guards for helper activity.
+
+- Cube gradient mip selection, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Use DXIL base-2 Log directly and honor the instruction minimum LOD before SampleLevel. Add mip-capable synthetic cube views without changing the existing single-mip view constructor.

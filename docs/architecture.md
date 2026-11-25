@@ -153,3 +153,8 @@ A uniform branch may select either of two static samplers. Lowering samples
 both bindings with the original derivatives and selects the result on the
 matching predecessor edge. Static sampler indices remain in the existing
 shader binding layout.
+
+Cube samples with explicit face gradients use the base-2 footprint LOD and
+apply the instruction's minimum LOD before `SampleLevel`. Synthetic cube
+mip fixtures compile on Linux; numerical D3D12 readback tests are included
+for Windows, but have not been run here.

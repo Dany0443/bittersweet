@@ -31,6 +31,9 @@ changes correct helper-lane reads, inactive-lane swizzles, DPP fetch-inactive
 handling and zero-stride raw-buffer accesses. Large texture-content checks
 use parallel BLAKE3 with identical checksums. Synthetic tests run on Linux;
 these checks do not establish title compatibility or frame-time gains.
+DexNom ports add uniform static-sampler choices, restored wave64 masks,
+source-less/CMPX decoding fixes, pixel quad operations, cube-gradient mip
+selection and shader optimizer analysis reuse.
 
 ## Layout
 

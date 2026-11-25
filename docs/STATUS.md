@@ -68,10 +68,11 @@ These are upstream claims, not our measurements:
 | Raw VCC scalar branches | Belobug #83 / VIctory #2406 | Makes the rule explicit even with an attached EXEC dependency |
 | Parallel large-texture content hashes | klbf-lab #28 | Portable checksum-equivalence tests pass; Windows staging call sites and runtime speed unverified |
 
-DexNom's uniform static-sampler selection is also ported. Its synthetic
-regression passes on Linux; rendered output has not been exercised. Restored
-wave64 mask recognition is also ported, with intact and corrupted high-word
-regressions.
+DexNom ports also cover uniform static-sampler selection, restored wave64
+masks, source-less VOP1 and VOP3 CMPX decoding, pixel quad operations,
+cube-gradient mip selection and optimizer analysis reuse. Synthetic Linux
+tests pass and Windows shader tests type-check. GPU readback, frame-time
+changes and title execution remain unverified.
 
 ## Pending, in priority order
 
