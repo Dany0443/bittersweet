@@ -12,3 +12,5 @@ pub mod paths;
 pub mod logging;
 
 pub mod pipeline;
+
+pub mod warm;
