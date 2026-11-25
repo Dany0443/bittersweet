@@ -6,3 +6,5 @@
 pub mod gpu;
 
 pub mod vram;
+
+pub mod paths;
