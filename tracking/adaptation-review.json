@@ -144,6 +144,14 @@
       "reason": "Reuse function effects and dominator analysis between cleanup rounds, rebuilding the tree after control-flow pruning. The Windows memory-transfer changes are not included.",
       "validation": "All 187 portable shader tests pass, including randomized optimizer equivalence checks. No frame-time measurement.",
       "pr": 25
+    },
+    {
+      "repo": "DexNom/VIctory",
+      "commit_sha": "921d8d3b43b44f3a6ca4b44095edd3c4baf10a87",
+      "decision": "ported",
+      "feature": "Pixel quad reads and quad-local DPP8",
+      "reason": "Use native quad reads for pixel and mesh quad permutations, specialize broadcasts/exchanges, and reject DPP8 selections that cross pixel quads. Use quad-local EXEC guards for helper activity.",
+      "validation": "The quad-local DPP8 regression failed before the port. All 188 portable shader tests pass. Triangle-edge GPU readback has not been executed."
     }
   ]
 }
