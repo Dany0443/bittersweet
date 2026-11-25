@@ -36,6 +36,14 @@ const EXCEPTIONS: &[(&str, &str)] = &[(
     "the BCPack format's constant tables: nothing decodes without them and they cannot be derived (owner's decision, 2026-11-23; docs/asset-policy.md)",
 )];
 
+/// Per-file size ceilings for source that is genuinely large, while keeping
+/// every other check (magic, NUL bytes, encoded runs) in force. Keep this
+/// empty if at all possible.
+const SIZE_EXCEPTIONS: &[(&str, usize)] = &[(
+    "crates/victory-shader/src/emit/lower.rs",
+    768 * 1024, // the lowering tables alone; 531 KB at the time of writing
+)];
+
 /// Signatures of formats that must never be committed.
 const FORBIDDEN_MAGIC: &[(&[u8], &str)] = &[
     (b"MZ", "PE executable"),
@@ -157,9 +165,13 @@ pub fn check(path: &str, content: &[u8]) -> Vec<String> {
     if !allowed {
         problems.push("file type not on the allowlist".to_owned());
     }
-    if content.len() > MAX_FILE_SIZE {
+    let limit = SIZE_EXCEPTIONS
+        .iter()
+        .find(|(p, _)| *p == path)
+        .map_or(MAX_FILE_SIZE, |(_, n)| *n);
+    if content.len() > limit {
         problems.push(format!(
-            "{} bytes exceeds the {MAX_FILE_SIZE}-byte limit",
+            "{} bytes exceeds the {limit}-byte limit",
             content.len()
         ));
     }
