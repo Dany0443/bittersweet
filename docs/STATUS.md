@@ -69,7 +69,9 @@ These are upstream claims, not our measurements:
 | Parallel large-texture content hashes | klbf-lab #28 | Portable checksum-equivalence tests pass; Windows staging call sites and runtime speed unverified |
 
 DexNom's uniform static-sampler selection is also ported. Its synthetic
-regression passes on Linux; rendered output has not been exercised.
+regression passes on Linux; rendered output has not been exercised. Restored
+wave64 mask recognition is also ported, with intact and corrupted high-word
+regressions.
 
 ## Pending, in priority order
 

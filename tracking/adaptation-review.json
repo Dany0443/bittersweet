@@ -109,6 +109,14 @@
       "feature": "Uniform static-sampler selection",
       "reason": "Sample both constant bindings and select the texel using the original uniform branch edge. Preserve derivatives and retain unreachable-edge handling.",
       "validation": "Synthetic regression failed before the port; victory-shader passes 184 tests with 2 ignored on Linux. GPU execution unverified."
+    },
+    {
+      "repo": "DexNom/VIctory",
+      "commit_sha": "76749ce58da23a43a3500454a8b69c53f05aa477",
+      "decision": "ported",
+      "feature": "Restored wave64 mask recognition",
+      "reason": "Trace both scalar-copy chains back to the same known mask in their original dword order. Reject a duplicated or replaced high dword.",
+      "validation": "Synthetic intact/corrupted-mask regression failed before the port. The portable shader suite passes on Linux; GPU execution unverified."
     }
   ]
 }
