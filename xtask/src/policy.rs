@@ -41,10 +41,16 @@ const EXCEPTIONS: &[(&str, &str)] = &[(
 /// Per-file size ceilings for source that is genuinely large, while keeping
 /// every other check (magic, NUL bytes, encoded runs) in force. Keep this
 /// empty if at all possible.
-const SIZE_EXCEPTIONS: &[(&str, usize)] = &[(
-    "crates/victory-shader/src/emit/lower.rs",
-    768 * 1024, // the lowering tables alone; 531 KB at the time of writing
-)];
+const SIZE_EXCEPTIONS: &[(&str, usize)] = &[
+    (
+        "crates/victory-shader/src/emit/lower.rs",
+        768 * 1024, // the lowering tables alone; 531 KB at the time of writing
+    ),
+    (
+        "tracking/sync-report.json",
+        4 * 1024 * 1024, // one record per upstream PR/commit; ~800 KB now
+    ),
+];
 
 /// Signatures of formats that must never be committed.
 const FORBIDDEN_MAGIC: &[(&[u8], &str)] = &[
