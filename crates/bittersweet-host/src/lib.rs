@@ -14,3 +14,5 @@ pub mod logging;
 pub mod pipeline;
 
 pub mod warm;
+
+pub mod kernel;
