@@ -80,6 +80,6 @@ Thumbs.db
 # bittersweet generated runtime (Proton, prefix, caches)
 .runtime/
 
-# Python bytecode from the tracking scripts
+# Python bytecode
 __pycache__/
 *.pyc

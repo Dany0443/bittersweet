@@ -15,8 +15,6 @@ const MAX_ENCODED_RUN: usize = 512;
 
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "rs", "toml", "md", "txt", "lock", "yml", "yaml", "json", "hlsl", "hlsli", "ps1", "cmd", "sh",
-    // The update tools: read-only scrapers and the tracked-repository sync.
-    "py",
     // Small, hand-written vector art (the project logo). Text, and the
     // encoded-run check below still catches an embedded payload.
     "svg",
@@ -46,10 +44,6 @@ const SIZE_EXCEPTIONS: &[(&str, usize)] = &[
     (
         "crates/victory-shader/src/emit/lower.rs",
         768 * 1024, // the lowering tables alone; 531 KB at the time of writing
-    ),
-    (
-        "tracking/sync-report.json",
-        4 * 1024 * 1024, // one record per upstream PR/commit; ~800 KB now
     ),
 ];
 

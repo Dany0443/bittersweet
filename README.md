@@ -44,9 +44,7 @@ selection and shader optimizer analysis reuse.
 | `crates/victory-*` | The upstream runtime: PE loader, console APIs, D3D12.X → host D3D12, shader translation, formats, pipeline cache |
 | `apps/victory` | The Windows runtime front end (`run`, `inspect`, `shader`, and the Windows-only `translate`) |
 | `setup.sh` | Idempotent Proton-GE/prefix/kernel setup |
-| `scripts/` | Read-only upstream standings scraper and repository sync |
-| `tracking/` | Latest page snapshots, PortWatch digest, triage report and generated changelog |
-| `docs/` | Architecture, upstream sync, beginner guide, asset policy |
+| `docs/` | Architecture, beginner guide, asset policy and Linux status |
 
 See [`docs/architecture.md`](docs/architecture.md) for the data flow and
 crate responsibilities, and [`docs/STATUS.md`](docs/STATUS.md)
@@ -55,8 +53,8 @@ AI coding agents should follow [`AGENTS.md`](AGENTS.md).
 
 ## Quick start (Linux)
 
-Requirements: Rust (see `rust-toolchain.toml`), Git, Python 3 for the
-tracking scripts, and the usual build tools.
+Requirements: Rust (see `rust-toolchain.toml`), Git, and the usual build
+tools.
 
 ```bash
 git clone <this repository> bittersweet
@@ -97,47 +95,6 @@ writes the prefix environment, and offers to raise `vm.max_map_count`.
 
 It never searches for, copies or launches a title. The only optional launch
 is `wineboot`, and only when you ask for it.
-
-## Upstream tracking
-
-The project follows two public sources: the community standings page and
-[PortWatch VI](https://portwatch-vi.xyz/), which publishes a machine-readable
-tracker with effort records, tools, nuke status, DMCA entries and news.
-Every update check:
-
-1. scrapes the standings, the "also watched" list and the updates;
-2. fetches PortWatch's `tracker.json` and merges its vetted efforts and
-   tools, plus its unreviewed candidates marked as such;
-3. discovers repositories that were not tracked before;
-4. flags renames, nukes, offline entries, takedowns and unreachable repos;
-5. asks GitHub for licence, default branch, new commits and open pull
-   requests;
-6. reads every page of commits and open PRs, flags timeout/device-loss
-   mentions for review, then sorts items into five triage buckets and writes
-   `tracking/sync-report.json`, `tracking/CHANGELOG.md` and
-   `tracking/PORTWATCH.md`.
-
-```bash
-python3 scripts/scrape_standings.py
-python3 scripts/fetch_portwatch.py
-python3 scripts/sync_upstream.py
-```
-
-The unified sync refreshes both feeds itself, so a direct invocation cannot
-silently use a stale PortWatch snapshot. For saved inputs, use
-`--offline-page saved.html --offline-portwatch saved-tracker.json`.
-`--pr-limit` controls page size (1–100), not total PR coverage. API failures
-are reported as incomplete and preserve the repository's sync checkpoint.
-Buckets and hold flags are automated screening; source review and focused
-tests are required before any port. Mentioning a timeout may describe a fix,
-so a hold flag requires review rather than proving a regression.
-
-Run offline tracking regression tests with
-`python3 -m unittest discover -s scripts -p 'test_*.py'`.
-
-All three scripts are read-only against upstream and never push. Their
-manifest, trust and triage conventions are documented in
-[`AGENTS.md`](AGENTS.md).
 
 ## Legal
 

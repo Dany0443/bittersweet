@@ -1,8 +1,8 @@
 # Linux status and roadmap
 
-This page is the honest state of the Linux/Proton effort. It is updated
-whenever a check changes what we know; the machine-readable record is
-`tracking/sync-report.json`, the source digest is `tracking/PORTWATCH.md`.
+This page records the current, locally verified state of the Linux/Proton
+effort. External project status is not tracked in this repository; agents
+should research current upstream sources when a task depends on them.
 
 ## What works today
 
@@ -35,22 +35,6 @@ portable, not that the title runs.
    a larger worker stack.
 5. **A real run.** No one has run this tree against a user-supplied copy
    under Proton. That is deliberate until the backend exists.
-
-## Evidence from the ecosystem
-
-The 2026-11-25 check found several Linux-specific results worth recording.
-These are upstream claims, not our measurements:
-
-- **TuxBox** reports reaching the target title's story intro on Linux with
-  stock Proton Experimental, and calls it not playable yet. It is the most
-  advanced Linux-first record in the tracked set.
-- **Scarlight** now presents itself as a Linux + Mesa port, with notes on
-  RADV's shader cache outgrowing its default, zero-copy title memory, and a
-  Proton-first architecture decision.
-- **VIctory** and its forks still lead on Windows; the Linux work is
-  concentrated in Scarlight, TuxBox and the Wine-specific pull requests.
-- **vkd3d-proton** needs one back edge per loop header. Builds that emit
-  several latches stall or hang in pipeline workers.
 
 ## Ported here
 
@@ -93,9 +77,8 @@ Porting them blind would add code we cannot compile or test on this host.
 
 | Risk | Current handling |
 |---|---|
-| The leaked executable and DMCA pressure | No game files, no executable, no download links; only public repositories are tracked |
-| Malware and lookalike repositories | PortWatch's `flagged` and `ignored` lists are never imported; candidates are untrusted |
-| Lost upstream work | Nuked repositories stay in the manifest with a date and note, so the loss is visible |
+| Proprietary material | No game files, executables or SDK material are included or linked |
+| Upstream changes | Agents research current sources per task; no shared snapshot is maintained |
 | Bit-rot in the base | The base snapshot is pinned; every port carries its upstream PR number |
 | False confidence from a green build | This page and the README state that the runtime is not functional on Linux |
 
@@ -107,7 +90,7 @@ Porting them blind would add code we cannot compile or test on this host.
 2. Move title-memory mapping behind that boundary, including the copied
    and non-sparse cases.
 3. Make the pipeline cache work with vkd3d-proton's refusal path.
-4. Run the portable shader translator over a user-supplied shader pack and
-   compare counts with the upstream reports.
+4. Run the portable shader translator over user-supplied shader data and
+   record reproducible results.
 5. Only then attempt a Proton run, with a user-supplied copy, and publish
    the log with the same care as the upstream test reports.

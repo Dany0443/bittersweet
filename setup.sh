@@ -91,13 +91,12 @@ check() {
     MISSING_OPTIONAL+=("$name")
   fi
 }
-check git        required "clone and update the tracking manifest"
-check python3    required "tracking scripts (stdlib only)"
+check git        required "clone and update the repository"
 check curl       required "download Proton-GE"
 check jq         required "parse the GitHub release JSON"
 check tar        required "extract Proton-GE"
 check sha512sum  required "verify the Proton-GE checksum"
-check gh         optional "GitHub API and PR triage (falls back to curl)"
+check gh         optional "GitHub release API access (falls back to curl)"
 check cargo      optional "build/run the host planner (a prebuilt binary is used otherwise)"
 check gcc        optional "shader tooling; clang is equally fine"
 check clang      optional "shader tooling; gcc is equally fine"
@@ -108,8 +107,8 @@ check ninja      optional "CMake generator"
 
 if [ "${#MISSING_REQUIRED[@]}" -gt 0 ]; then
   warn "install these first: ${MISSING_REQUIRED[*]}"
-  say  "  Arch:   sudo pacman -S --needed git python curl jq tar coreutils"
-  say  "  Debian: sudo apt install git python3 curl jq tar coreutils"
+  say  "  Arch:   sudo pacman -S --needed git curl jq tar coreutils"
+  say  "  Debian: sudo apt install git curl jq tar coreutils"
   die "required tools are missing"
 fi
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then

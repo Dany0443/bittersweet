@@ -10,7 +10,7 @@
 pub enum Pressure {
     /// 6 GB or less: aggressive mip reduction.
     Severe,
-    /// 8 GB: the common low-end report in the standings.
+    /// 8 GB: use a conservative texture budget.
     High,
     /// 10–12 GB: the cards losing the device on world entry.
     Moderate,
@@ -29,7 +29,7 @@ pub struct VramBudget {
 }
 
 /// Budget a card's reported VRAM. `total_mb == 0` (unknown) is treated as
-/// 8 GB, the most common reported configuration, and flagged `High`.
+/// 8 GB, a conservative baseline, and flagged `High`.
 pub fn for_vram(total_mb: u64) -> VramBudget {
     let total_mb = if total_mb == 0 { 8192 } else { total_mb };
     let (percent, mip_bias, pressure) = match total_mb {
