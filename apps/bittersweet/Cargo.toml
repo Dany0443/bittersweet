@@ -1,0 +1,18 @@
+[package]
+name = "bittersweet"
+description = "Linux/Proton host checker and tuning planner for the bittersweet runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "bittersweet"
+path = "src/main.rs"
+
+[dependencies]
+bittersweet-host = { path = "../../crates/bittersweet-host" }
+
+[lints]
+workspace = true
