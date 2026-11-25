@@ -47,9 +47,9 @@ impl KernelAdvice {
     /// applied by the tool.
     pub fn suggested_sysctl(self) -> Option<String> {
         match self {
-            KernelAdvice::TooLow(_) | KernelAdvice::Acceptable(_) => Some(format!(
-                "vm.max_map_count={RECOMMENDED_MAX_MAP_COUNT}"
-            )),
+            KernelAdvice::TooLow(_) | KernelAdvice::Acceptable(_) => {
+                Some(format!("vm.max_map_count={RECOMMENDED_MAX_MAP_COUNT}"))
+            }
             _ => None,
         }
     }
@@ -80,7 +80,10 @@ mod tests {
 
     #[test]
     fn the_minimum_is_acceptable_and_the_recommendation_is_good() {
-        assert_eq!(assess(Some(MIN_MAX_MAP_COUNT)), KernelAdvice::Acceptable(MIN_MAX_MAP_COUNT));
+        assert_eq!(
+            assess(Some(MIN_MAX_MAP_COUNT)),
+            KernelAdvice::Acceptable(MIN_MAX_MAP_COUNT)
+        );
         assert_eq!(
             assess(Some(RECOMMENDED_MAX_MAP_COUNT)),
             KernelAdvice::Good(RECOMMENDED_MAX_MAP_COUNT)

@@ -152,7 +152,10 @@ mod tests {
         let f = Fixture::new();
         f.write("sys/class/drm/card0/device/vendor", "0x1002\n");
         f.write("sys/class/drm/card0/device/device", "0x7550\n");
-        f.write("sys/class/drm/card0/device/mem_info_vram_total", "17163091968\n");
+        f.write(
+            "sys/class/drm/card0/device/mem_info_vram_total",
+            "17163091968\n",
+        );
         f.write("sys/class/drm/card0/device/product_name", "Navi 48\n");
         f.write("sys/class/drm/card1-DP-1/status", "connected\n");
         f.write("proc/sys/vm/max_map_count", "1048576\n");

@@ -80,7 +80,9 @@ pub fn data_dir(name: &str) -> Result<PathBuf, &'static str> {
 mod tests {
     use super::*;
 
-    fn env_from(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
+    fn env_from(
+        pairs: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<OsString> {
         move |k| {
             pairs
                 .iter()
@@ -92,15 +94,9 @@ mod tests {
     // Ported test from VIctory PR #2579.
     #[test]
     fn empty_variables_are_not_directories() {
-        let env = env_from(&[
-            ("XDG_CACHE_HOME", ""),
-            ("HOME", "/tmp/bs-home"),
-        ]);
+        let env = env_from(&[("XDG_CACHE_HOME", ""), ("HOME", "/tmp/bs-home")]);
         let dir = default_cache_dir_from("cache", env).unwrap();
-        assert_eq!(
-            dir,
-            PathBuf::from("/tmp/bs-home/.cache/bittersweet/cache")
-        );
+        assert_eq!(dir, PathBuf::from("/tmp/bs-home/.cache/bittersweet/cache"));
 
         let env = env_from(&[("XDG_CACHE_HOME", ""), ("HOME", "")]);
         assert!(default_cache_dir_from("cache", env).is_err());

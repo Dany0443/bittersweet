@@ -94,11 +94,9 @@ fn overridden_report(args: &[String]) -> host::probe::HostReport {
         report.device = default_device;
     }
     if let Some(device) = value(args, "--device") {
-        report.device = u16::from_str_radix(
-            device.trim_start_matches("0x").trim_start_matches("0X"),
-            16,
-        )
-        .unwrap_or(report.device);
+        report.device =
+            u16::from_str_radix(device.trim_start_matches("0x").trim_start_matches("0X"), 16)
+                .unwrap_or(report.device);
     }
     if let Some(vram) = value(args, "--vram") {
         report.vram_mb = vram.parse().unwrap_or(report.vram_mb);

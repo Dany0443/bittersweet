@@ -33,10 +33,7 @@ pub fn doctor(report: &HostReport, cache_root: &std::path::Path) -> (String, boo
     let mut out = String::new();
     out.push_str("bittersweet host check\n");
     out.push_str("-----------------------\n");
-    out.push_str(&format!(
-        "GPU:     {}\n",
-        plan::capability_line(report)
-    ));
+    out.push_str(&format!("GPU:     {}\n", plan::capability_line(report)));
     if let Some(name) = &report.gpu_name {
         out.push_str(&format!("Name:    {name}\n"));
     }

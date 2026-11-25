@@ -7,13 +7,8 @@
 
 /// Resolve the filter string: `BITTERSWEET_LOG`, then `RUST_LOG`, then the
 /// built-in default. Empty values are skipped, not treated as a filter.
-pub fn resolve_filter(
-    default_level: &str,
-    env: impl Fn(&str) -> Option<String>,
-) -> String {
-    let get = |k: &str| {
-        super::paths::nonempty_str(&env, k).filter(|v| !v.trim().is_empty())
-    };
+pub fn resolve_filter(default_level: &str, env: impl Fn(&str) -> Option<String>) -> String {
+    let get = |k: &str| super::paths::nonempty_str(&env, k).filter(|v| !v.trim().is_empty());
     get("BITTERSWEET_LOG")
         .or_else(|| get("RUST_LOG"))
         .unwrap_or_else(|| default_level.to_owned())

@@ -112,10 +112,7 @@ mod tests {
         assert_eq!(check_modes(true, false), Ok(Some(WarmMode::Warm)));
         assert_eq!(check_modes(false, true), Ok(Some(WarmMode::Cache)));
         assert_eq!(check_modes(false, false), Ok(None));
-        assert_eq!(
-            check_modes(true, true),
-            Err(ModeConflict::WarmAndCache)
-        );
+        assert_eq!(check_modes(true, true), Err(ModeConflict::WarmAndCache));
     }
 
     #[test]

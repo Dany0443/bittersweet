@@ -190,11 +190,18 @@ pub fn build(profile: &HostReport, cache_root: &Path, proton: bool) -> TuningPla
     // The runtime reads these; they are policy, not driver options.
     put!("BITTERSWEET_VRAM_BUDGET_MB", budget.texture_mb.to_string());
     put!("BITTERSWEET_MIP_BIAS", budget.mip_bias.to_string());
-    put!("BITTERSWEET_PIPELINE_KEY_CAP", crate::pipeline::EARLY_MAX.to_string());
+    put!(
+        "BITTERSWEET_PIPELINE_KEY_CAP",
+        crate::pipeline::EARLY_MAX.to_string()
+    );
     put!("BITTERSWEET_SHADER_WARM_BUDGET_SECS", "45");
     put!(
         "BITTERSWEET_WAVE64",
-        if wave64_emulation { "emulate" } else { "native" },
+        if wave64_emulation {
+            "emulate"
+        } else {
+            "native"
+        },
     );
     put!(
         "BITTERSWEET_MESH_PIPELINES",
@@ -395,7 +402,11 @@ mod tests {
         assert_eq!(get("BITTERSWEET_MESH_PIPELINES"), Some("0"));
         assert_eq!(get("BITTERSWEET_MESH_REFUSAL"), Some("gfx9 (Vega)"));
         assert_eq!(get("VKD3D_CONFIG"), Some("no_upload_hvv"));
-        assert!(plan.advisories.iter().any(|a| a.text.contains("mesh pipelines disabled")));
+        assert!(
+            plan.advisories
+                .iter()
+                .any(|a| a.text.contains("mesh pipelines disabled"))
+        );
     }
 
     #[test]
