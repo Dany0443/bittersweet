@@ -900,7 +900,9 @@ impl<'a> Lanes<'a> {
         // Recover copied wave64 masks only when both original dwords match.
         if self.p.wave64 {
             let source = (self.move_source(k.0), self.move_source(k.1));
-            if source != k && let Some(&m) = self.masks.get(&source) {
+            if source != k
+                && let Some(&m) = self.masks.get(&source)
+            {
                 self.masks.insert(k, m);
                 return (m, true);
             }

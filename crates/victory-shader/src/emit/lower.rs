@@ -4415,12 +4415,26 @@ impl<'a> Lower<'a> {
             Some(0xe4) => return x,
             Some(p @ (0x00 | 0x55 | 0xaa | 0xff)) => {
                 let lane = self.s.m.i32(u32::from(p & 3));
-                return self.s.op(c, "quadReadLaneAt.i32", Attr::NoUnwind, self.s.t.i32, 122, &[x, lane]);
+                return self.s.op(
+                    c,
+                    "quadReadLaneAt.i32",
+                    Attr::NoUnwind,
+                    self.s.t.i32,
+                    122,
+                    &[x, lane],
+                );
             }
             Some(p @ (0xb1 | 0x4e | 0x1b)) => {
                 // The low two bits select lane 0's partner: XOR 1, 2, or 3.
                 let direction = self.s.m.i8((p & 3) - 1);
-                return self.s.op(c, "quadOp.i32", Attr::NoUnwind, self.s.t.i32, 123, &[x, direction]);
+                return self.s.op(
+                    c,
+                    "quadOp.i32",
+                    Attr::NoUnwind,
+                    self.s.t.i32,
+                    123,
+                    &[x, direction],
+                );
             }
             _ => {}
         }
