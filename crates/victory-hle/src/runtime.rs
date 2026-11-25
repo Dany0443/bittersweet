@@ -26,7 +26,14 @@ static IMAGE_PATHS: Mutex<Vec<(usize, PathBuf)>> = Mutex::new(Vec::new());
 /// own path (`GetModuleFileName`) to find its data, and must not get our
 /// cache copy.
 pub fn set_image_path(base: usize, path: &Path) {
-    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+    // Title paths are Windows paths even when the host is Linux, so a
+    // `C:\...` path is already absolute there and must not be resolved
+    // against the host's working directory.
+    let path = if path.is_absolute() || is_windows_absolute(path) {
+        path.to_owned()
+    } else {
+        std::path::absolute(path).unwrap_or_else(|_| path.to_owned())
+    };
     let mut paths = IMAGE_PATHS.lock().unwrap_or_else(|e| e.into_inner());
     paths.retain(|(b, _)| *b != base);
     paths.push((base, path));
@@ -51,8 +58,26 @@ pub fn image_named(file: &str) -> Option<usize> {
     let paths = IMAGE_PATHS.lock().unwrap_or_else(|e| e.into_inner());
     paths
         .iter()
-        .find(|(_, p)| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case(file)))
+        .find(|(_, p)| windows_file_name(p).is_some_and(|n| n.eq_ignore_ascii_case(file)))
         .map(|(b, _)| *b)
+}
+
+/// A path is absolute the way the title's Windows loader means it: a drive
+/// letter (`C:\`, `C:/`) or a UNC share (`\\server\share`).
+fn is_windows_absolute(path: &Path) -> bool {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    let drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    drive || bytes.starts_with(br"\\")
+}
+
+/// The last component of a Windows path, independent of the host's
+/// separators: title images are named `C:\games\mapped.dll` on every host.
+fn windows_file_name(path: &Path) -> Option<&str> {
+    let text = path.to_str()?;
+    text.rsplit(['\\', '/']).find(|part| !part.is_empty())
 }
 
 /// Maps a title DLL the title loads itself (`LoadLibrary`) and returns its
