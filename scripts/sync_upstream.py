@@ -259,9 +259,9 @@ def collect(repo: dict, since: dt.datetime, pr_limit: int) -> dict:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=str(ROOT / "UPSTREAM_REPOS.json"))
-    ap.add_argument("--snapshot", default=str(ROOT / "data" / "standings.json"))
-    ap.add_argument("--report", default=str(ROOT / "data" / "sync-report.json"))
-    ap.add_argument("--changelog", default=str(ROOT / "data" / "CHANGELOG.md"))
+    ap.add_argument("--snapshot", default=str(ROOT / "tracking" / "standings.json"))
+    ap.add_argument("--report", default=str(ROOT / "tracking" / "sync-report.json"))
+    ap.add_argument("--changelog", default=str(ROOT / "tracking" / "CHANGELOG.md"))
     ap.add_argument("--remotes", default=str(ROOT / "scripts" / "remotes.txt"))
     ap.add_argument("--since", help="ISO timestamp; defaults to the manifest's window")
     ap.add_argument("--offline-page", help="use a saved HTML page instead of fetching")
