@@ -1,8 +1,8 @@
-# KLBF Lab: beginner's guide (Windows)
+# Windows runtime guide (upstream)
 
 Every step below is a command to copy and paste, in order. You only need your own copy of the game's Xbox Series files in a folder. KLBF Lab includes no game files.
 
-In this guide the game files are in **`C:\Games\GTA6`** (the folder that holds `game_scarlett_master.exe` and `shaders.rpf`). If yours are elsewhere, replace that path everywhere.
+In this guide the game files are in **`C:\Games\Title`** (the folder that holds the title executable and `shaders.rpf`). If yours are elsewhere, replace that path everywhere.
 
 Open **PowerShell** (Start menu → type `PowerShell` → Enter) and paste each block. Wait for one block to finish before the next.
 
@@ -71,7 +71,7 @@ If your graphics card stops responding about a minute after the game world start
 This compiles all of the game's shaders for your graphics card ahead of time, so the game doesn't stutter or crash on them later:
 
 ```powershell
-target\release\victory.exe translate --cache --pipelines --jobs 8 C:\Games\GTA6\shaders.rpf
+target\release\victory.exe translate --cache --pipelines --jobs 8 C:\Games\Title\shaders.rpf
 ```
 
 If it crashes (the graphics driver sometimes does), **run the same line again**: it resumes where it stopped and remembers what crashed. It's done when it ends without a crash. Do it again after each KLBF Lab update.
@@ -79,7 +79,7 @@ If it crashes (the graphics driver sometimes does), **run the same line again**:
 ## 8. Play
 
 ```powershell
-target\release\victory.exe run --console series-s C:\Games\GTA6\game_scarlett_master.exe --execute
+target\release\victory.exe run --console series-s C:\Games\Title\<title executable>.exe --execute
 ```
 
 - **Plug in the controller before starting.**

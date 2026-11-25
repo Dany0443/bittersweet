@@ -15,6 +15,11 @@ const MAX_ENCODED_RUN: usize = 512;
 
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "rs", "toml", "md", "txt", "lock", "yml", "yaml", "json", "hlsl", "hlsli", "ps1", "cmd", "sh",
+    // The update tools: read-only scrapers and the tracked-repository sync.
+    "py",
+    // Small, hand-written vector art (the project logo). Text, and the
+    // encoded-run check below still catches an embedded payload.
+    "svg",
 ];
 const ALLOWED_NAMES: &[&str] = &[
     ".gitignore",
@@ -25,6 +30,7 @@ const ALLOWED_NAMES: &[&str] = &[
     "LICENSE",
     "LICENSE-MIT",
     "LICENSE-APACHE",
+    "NOTICE",
 ];
 
 /// Paths explicitly exempted, with a reason. Keep this empty if at all possible.
@@ -32,6 +38,20 @@ const EXCEPTIONS: &[(&str, &str)] = &[(
     "crates/victory-formats/src/bcpack-tables.bin",
     "the BCPack format's constant tables: nothing decodes without them and they cannot be derived (owner's decision, 2026-11-23; docs/asset-policy.md)",
 )];
+
+/// Per-file size ceilings for source that is genuinely large, while keeping
+/// every other check (magic, NUL bytes, encoded runs) in force. Keep this
+/// empty if at all possible.
+const SIZE_EXCEPTIONS: &[(&str, usize)] = &[
+    (
+        "crates/victory-shader/src/emit/lower.rs",
+        768 * 1024, // the lowering tables alone; 531 KB at the time of writing
+    ),
+    (
+        "tracking/sync-report.json",
+        4 * 1024 * 1024, // one record per upstream PR/commit; ~800 KB now
+    ),
+];
 
 /// Signatures of formats that must never be committed.
 const FORBIDDEN_MAGIC: &[(&[u8], &str)] = &[
@@ -154,9 +174,13 @@ pub fn check(path: &str, content: &[u8]) -> Vec<String> {
     if !allowed {
         problems.push("file type not on the allowlist".to_owned());
     }
-    if content.len() > MAX_FILE_SIZE {
+    let limit = SIZE_EXCEPTIONS
+        .iter()
+        .find(|(p, _)| *p == path)
+        .map_or(MAX_FILE_SIZE, |(_, n)| *n);
+    if content.len() > limit {
         problems.push(format!(
-            "{} bytes exceeds the {MAX_FILE_SIZE}-byte limit",
+            "{} bytes exceeds the {limit}-byte limit",
             content.len()
         ));
     }

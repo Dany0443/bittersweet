@@ -228,6 +228,7 @@ fn footprint(desc: &ResourceDesc) -> Option<AllocationInfo> {
 
 /// A format as the host has it. The console's 16-bit depth with stencil
 /// (and its typeless views) has no PC format: the 24-bit ones stand in.
+#[cfg_attr(not(windows), allow(dead_code))] // read by the Windows host; tested everywhere
 pub(crate) fn pc_format(format: u32) -> u32 {
     match format {
         118 => 45,
@@ -613,11 +614,13 @@ pub(crate) fn family(format: u32) -> u32 {
 }
 
 /// sRGB formats and their linear twins.
+#[cfg(windows)]
 pub(crate) const SRGB: [(u32, u32); 3] = [(29, 28), (91, 87), (93, 88)];
 
 /// The format a view of a title texture must name when its host copy is
 /// typeless (see [`DEPTH_FORMATS`], [`SRGB`]): the title's own; `None` if
 /// the host copy is typed.
+#[cfg(windows)]
 pub(crate) fn view_format(this: This) -> Option<u32> {
     // First: a view of no resource (a typed null view) has none.
     let host = host_resource(this)?;
@@ -631,6 +634,7 @@ pub(crate) fn view_format(this: This) -> Option<u32> {
 /// Depth formats with their typeless family: depth textures that shaders
 /// read are made typeless on the host, which only allows views of
 /// typeless depth resources.
+#[cfg(windows)]
 pub(crate) const DEPTH_FORMATS: [(u32, u32); 4] = [(20, 19), (40, 39), (45, 44), (55, 53)];
 
 /// Mip levels, the full chain for 0.

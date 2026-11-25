@@ -38,12 +38,47 @@ Converting them ahead of time from files is only a warm-up.
 | `victory-formats` | the GPU's texture layouts (sizes, tiling, detiling), audio codecs; planned: BCPack |
 | `victory-pipeline` | converter trait, content-addressed cache |
 | `victory-game` | the title-specific formats, build identities, hooks |
+| `bittersweet-host` | Linux host policy: probe, environment plan, GPU/wave/VRAM rules, cache and log paths |
 | `apps/victory` | command-line front end |
+| `apps/bittersweet` | Linux host CLI (`doctor`, `plan`, `check`, `pipeline`) |
 | `xtask` | asset-policy check, git hooks |
 | `tests/fixtures/hle-probe` | a stand-in "title" (our own code) for loader tests |
 
 Everything except `victory-game` is platform-level and can be tested with
 any Xbox Series title.
+
+## Host layer and Linux builds
+
+`bittersweet-host` is dependency-free (std only) and is the only crate that
+reads the Linux host. It turns a probe into an ordered environment:
+
+```
+/sys, /proc, /etc/os-release
+        │
+        ▼
+   probe.rs ──► plan.rs ──► bittersweet.env
+        │         │
+        │         ├─ gpu.rs     vendor family, wave width, mesh support
+        │         ├─ vram.rs    texture budget and mip bias
+        │         ├─ pipeline.rs early-key cap
+        │         ├─ warm.rs    warm-up/pre-build conflict
+        │         ├─ paths.rs   cache directories (empty env vars ignored)
+        │         ├─ logging.rs log filter (empty env vars ignored)
+        │         └─ kernel.rs  vm.max_map_count advice
+        ▼
+   apps/bittersweet: doctor, plan, check, pipeline
+```
+
+The Windows runtime is still Windows-target code. On Linux it builds
+because its host surface is gated with `cfg(windows)`; the Linux host layer
+does not replace that surface yet. `Cargo.toml` lists the portable crates
+as `default-members` so `cargo build` and `cargo test` stay green on Linux
+without pretending the D3D12 runtime was ported.
+
+Cross-building the Windows runtime from Linux is possible with
+`cargo-xwin`, the approach used by upstream Scarlight and TuxBox; it is not
+part of the default workflow.
+
 
 ## Import resolution
 

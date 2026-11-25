@@ -1,0 +1,24 @@
+bittersweet
+Copyright (C) 2026 the bittersweet contributors
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+The full licence text is in LICENSE. A per-project breakdown of the code
+this work is derived from, with the licence of each, is in CREDITS.md.
+
+bittersweet is an independent compatibility project. It is not affiliated
+with, endorsed by, or sponsored by the platform holder or the publisher of
+the title it is designed to run. Product and company names are trademarks
+of their respective owners and are used only to describe compatibility.
+
+This repository contains no game assets, retail executables, console SDK
+libraries, keys or other proprietary material. It operates only on files
+the user supplies at runtime.

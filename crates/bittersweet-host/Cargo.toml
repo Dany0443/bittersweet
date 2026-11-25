@@ -1,0 +1,13 @@
+[package]
+name = "bittersweet-host"
+description = "Linux/Proton host policy for bittersweet: GPU capabilities, VRAM budget and environment tuning."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
