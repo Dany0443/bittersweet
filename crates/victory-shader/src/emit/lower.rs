@@ -15,7 +15,7 @@ use super::shader::{Shader, flags};
 use crate::ShaderError;
 use crate::gfx10::{Dpp, Fields, NULL, Operand};
 use crate::io::{Barycentric, Export, Input, Interp, Io, Target};
-use crate::ir::{EXEC, Exit, Inst, Program, Reg, Value};
+use crate::ir::{EXEC, Inst, Program, Reg, Value};
 use crate::native::{HwStage, NativeProgram, ResourceType, RootType, StageIo, Usage, UsedResource};
 use crate::resource::{Address, CODE, MEMORY, Resources, Role, Site, Source};
 use crate::structure::{Atom, Bool, LaneExit, Structured};
@@ -65,6 +65,10 @@ pub(crate) struct Lowered {
     /// Whether the program uses wave operations.
     #[cfg(test)]
     pub wave_ops: bool,
+    #[cfg(test)]
+    pub helper_readfirst: u32,
+    #[cfg(test)]
+    pub exec_ballots: u32,
     /// Resource properties of each heap handle made, in creation order.
     #[cfg(test)]
     pub heap_props: Vec<(u32, u32)>,
@@ -2348,6 +2352,10 @@ impl<'a> Lower<'a> {
             wave_ops: self.s.flags & flags::WAVE_OPS != 0,
             #[cfg(test)]
             heap_props: self.s.heap_props.clone(),
+            #[cfg(test)]
+            helper_readfirst: self.s.helper_readfirst,
+            #[cfg(test)]
+            exec_ballots: self.s.exec_ballots,
             dxil: self.s.finish(),
             user_data,
             samplers: self.samplers,
@@ -4469,6 +4477,24 @@ impl<'a> Lower<'a> {
         (self.s.m.select(c, any, at, first), any)
     }
 
+    /// Scarlight #103 / project-flamingo #686: host wave operations omit
+    /// pixel helper lanes. Let those lanes consume their own value so a
+    /// descriptor waterfall can finish rather than waiting for a live lane.
+    fn helper_reads_own(&mut self, own: V, first: V) -> V {
+        if !self.s.pixel {
+            return first;
+        }
+        let c = self.cur;
+        let helper = self
+            .s
+            .op(c, "isHelperLane.i1", Attr::ReadOnly, self.s.t.i1, 221, &[]);
+        #[cfg(test)]
+        {
+            self.s.helper_readfirst += 1;
+        }
+        self.s.m.select(c, helper, own, first)
+    }
+
     fn read_lane(&mut self, x: V, lane: V) -> V {
         self.s.op(
             self.cur,
@@ -4564,6 +4590,8 @@ impl<'a> Lower<'a> {
             } else {
                 self.read_lane(x, src)
             };
+            // An inactive source lane reads 0, not the stale VGPR.
+            let r = self.active_lane_or_zero(r, src, guard);
             let reg = dst_reg.ok_or("a swizzle result")?;
             self.write(inst, Reg::V(reg), r, guard);
             return Ok(());
@@ -5363,8 +5391,6 @@ impl<'a> Lower<'a> {
                 _ => Err(name),
             };
         }
-        let m = &mut self.s.m;
-        let _ = m;
         let (r, carry): (V, Option<V>) = match name {
             "s_mov_b32" => (src32(self, 0)?, None),
             "s_movk_i32" => (sext16(self), None),
@@ -6429,7 +6455,6 @@ impl<'a> Lower<'a> {
                 }
             }
             Source::Phi { block, args } => {
-                let _ = site;
                 let phi = self.descriptor_phi(*block, args, sampler, 8)?;
                 Ok(self.s.heap_handle(self.cur, phi, sampler, false, props))
             }
@@ -6721,7 +6746,7 @@ impl<'a> Lower<'a> {
         }
         let mut guard = self.guard(b, i)?;
         if let Some(d) = v.dpp {
-            let (x, enable) = self.dpp(inst, d)?;
+            let (x, enable) = self.dpp(inst, d, guard)?;
             guard = match (guard, enable) {
                 (Some(g), Some(e)) => Some(self.s.m.bin(self.cur, Bin::And, g, e)),
                 (g, e) => g.or(e),
@@ -6733,9 +6758,70 @@ impl<'a> Lower<'a> {
         r
     }
 
+    /// Whether lane `src` of this host wave is active here (in EXEC), from
+    /// `waveActiveBallot`. The console's DPP sources outside EXEC are out of
+    /// bounds when fetch-inactive is clear (ported from project-flamingo
+    /// #684, `19dda7a54`).
+    fn src_lane_active(&mut self, src: V, guard: Option<V>) -> V {
+        let c = self.cur;
+        let i32t = self.s.t.i32;
+        if self.s.mesh.is_some() {
+            let active = guard.unwrap_or_else(|| self.s.m.bool(true));
+            let active = self.s.m.cast(c, Cast::ZExt, active, i32t);
+            let active = self.quad_pick(active, src);
+            let zero = self.s.m.i32(0);
+            return self.s.m.cmp(c, pred::NE, active, zero);
+        }
+        #[cfg(test)]
+        {
+            self.s.exec_ballots += 1;
+        }
+        // EXEC can be represented as a per-lane guard without a host
+        // branch. Ballot that bit rather than treating every host lane as on.
+        let t = guard.unwrap_or_else(|| self.s.m.bool(true));
+        let four = self.s.m.named_struct("dx.types.fouri32", vec![i32t; 4]);
+        let ballot = self
+            .s
+            .op(c, "waveActiveBallot", Attr::NoUnwind, four, 116, &[t]);
+        self.s.flags |= flags::WAVE_OPS;
+        let lo = self.s.m.extract(c, ballot, 0);
+        let (k31, k32, one, z) = (
+            self.s.m.i32(31),
+            self.s.m.i32(32),
+            self.s.m.i32(1),
+            self.s.m.i32(0),
+        );
+        let word = if self.wave() > 32 {
+            let hi = self.s.m.extract(c, ballot, 1);
+            let low = self.s.m.cmp(c, pred::IULT, src, k32);
+            self.s.m.select(c, low, lo, hi)
+        } else {
+            lo
+        };
+        let sh = self.s.m.bin(c, Bin::And, src, k31);
+        let bit = self.s.m.bin(c, Bin::LShr, word, sh);
+        let bit = self.s.m.bin(c, Bin::And, bit, one);
+        self.s.m.cmp(c, pred::NE, bit, z)
+    }
+
+    /// `value` when the console lane `lane` of this host wave is in EXEC,
+    /// else 0: a cross-lane read such as `ds_swizzle_b32` gives 0 from an
+    /// inactive source lane rather than the stale VGPR `waveReadLaneAt`
+    /// would see (ported from project-flamingo #697, `7b3b66859`).
+    fn active_lane_or_zero(&mut self, value: V, lane: V, guard: Option<V>) -> V {
+        let active = self.src_lane_active(lane, guard);
+        let zero = self.s.m.i32(0);
+        self.s.m.select(self.cur, active, value, zero)
+    }
+
     /// DPP: src0 as read from another lane, and which lanes write their
     /// result (none: all).
-    fn dpp(&mut self, inst: &Inst, dpp: Dpp) -> Result<(V, Option<V>), Why> {
+    ///
+    /// When `fi` is clear, an inactive source lane is out of bounds the same
+    /// way a row-bound miss is: `bound_ctrl` selects zero, else the lane
+    /// keeps its old destination. DPP8 has no `bound_ctrl` bit and always
+    /// zeros inactive sources when `fi` is clear.
+    fn dpp(&mut self, inst: &Inst, dpp: Dpp, guard: Option<V>) -> Result<(V, Option<V>), Why> {
         let Fields::Valu(v) = &inst.fields else {
             unreachable!()
         };
@@ -6745,6 +6831,9 @@ impl<'a> Lower<'a> {
         let x = self.i32_of(inst.read(Reg::V(reg)).ok_or("a DPP operand")?)?;
         // Quad permutations and DPP8 stay in groups the pixel layout shares.
         let quad = matches!(dpp, Dpp::Row { ctrl: 0..=0xFF, .. });
+        let fi = match dpp {
+            Dpp::Lanes { fi, .. } | Dpp::Row { fi, .. } => fi,
+        };
         let mesh_quad = self.s.mesh.is_some() && quad;
         if !mesh_quad {
             self.cross_lane(quad)?;
@@ -6765,7 +6854,7 @@ impl<'a> Lower<'a> {
                 let pick = self.s.m.bin(c, Bin::LShr, sel, sh);
                 let pick = self.s.m.bin(c, Bin::And, pick, seven);
                 let base = self.s.m.bin(c, Bin::And, lane, not7);
-                (self.s.m.bin(c, Bin::Or, base, pick), None, None, false)
+                (self.s.m.bin(c, Bin::Or, base, pick), None, None, true)
             }
             Dpp::Row {
                 ctrl,
@@ -6829,8 +6918,17 @@ impl<'a> Lower<'a> {
         } else {
             self.read_lane(x, src)
         };
+        // Geometric bounds, and source EXEC when fetch-inactive is clear.
+        let mut valid = inside;
+        if !fi {
+            let active = self.src_lane_active(src, guard);
+            valid = Some(match valid {
+                Some(v) => self.s.m.bin(c, Bin::And, v, active),
+                None => active,
+            });
+        }
         let mut enable = None;
-        if let Some(inside) = inside {
+        if let Some(inside) = valid {
             if zero {
                 let z = k(self, 0);
                 r = self.s.m.select(c, inside, r, z);
@@ -7461,18 +7559,6 @@ impl<'a> Lower<'a> {
                 let r = self.s.m.bin(c, Bin::Or, lo, hi);
                 int(self, r)
             }
-            "v_cvt_f16_f32" if v.opsel == 0 => {
-                // Rounded to nearest even (the MODE default) into the low half.
-                let a = f(self, 0)?;
-                let r = self
-                    .s
-                    .op(c, "legacyF32ToF16", Attr::ReadNone, self.s.t.i32, 130, &[a]);
-                let Some(Operand::Vector { reg, .. }) = v.dst else {
-                    return Err("a 16-bit result outside a VGPR");
-                };
-                let r = self.low_half(inst, reg, r);
-                int(self, r)
-            }
             "v_pack_b32_f16" => {
                 // Two f16 sources (op_sel: their high halves; abs and neg on
                 // the sign bit) into the low and high half.
@@ -7497,13 +7583,6 @@ impl<'a> Lower<'a> {
                 let hi = self.s.m.bin(c, Bin::Shl, halves[1], k16);
                 let r = self.s.m.bin(c, Bin::Or, halves[0], hi);
                 int(self, r)
-            }
-            "v_cvt_f32_f16" if v.opsel == 0 => {
-                let a = s(self, 0)?;
-                let r = self
-                    .s
-                    .op(c, "legacyF16ToF32", Attr::ReadNone, self.s.t.f32, 131, &[a]);
-                float(self, r)
             }
             "v_cndmask_b32" => {
                 let mask = match v.src.get(2) {
@@ -7727,6 +7806,7 @@ impl<'a> Lower<'a> {
                 } else {
                     mine
                 };
+                let r = self.helper_reads_own(a, r);
                 int(self, r)
             }
             _ => {
@@ -10507,6 +10587,8 @@ impl<'a> Lower<'a> {
                 Some(index) if used.is_some_and(|u| u.stride == 1) => {
                     self.s.m.bin(c, Bin::Add, index, off)
                 }
+                // Scarlight #103 / project-flamingo #720: index * 0 is raw at off.
+                Some(_) if used.is_some_and(|u| u.stride == 0) => off,
                 Some(_) => return Err("a byte or 16-bit buffer access by index"),
             };
             let h = self.handle(site, src, false, (11 | u, 0))?;
@@ -10592,6 +10674,9 @@ impl<'a> Lower<'a> {
                 Some(index) if used.is_some_and(|u| u.stride == 1) => {
                     let byte = self.s.m.bin(c, Bin::Add, index, off);
                     (self.handle(site, src, false, (11 | u, 0))?, [byte, iu, iu])
+                }
+                Some(_) if used.is_some_and(|u| u.stride == 0) => {
+                    (self.handle(site, src, false, (11 | u, 0))?, [off, iu, iu])
                 }
                 Some(index) => {
                     let stride = used.map_or(0, |u| u.stride);
@@ -10683,6 +10768,10 @@ impl<'a> Lower<'a> {
                         args.push(self.handle(site, src, false, (11 | u, 0))?);
                         args.extend([byte, iu]);
                     }
+                    Some(_) if used.is_some_and(|u| u.stride == 0) => {
+                        args.push(self.handle(site, src, false, (11 | u, 0))?);
+                        args.extend([off, iu]);
+                    }
                     Some(index) => {
                         let stride = used.map_or(0, |u| u.stride);
                         if stride < 4 || !stride.is_multiple_of(4) {
@@ -10755,6 +10844,17 @@ impl<'a> Lower<'a> {
                         self.s.t.res_ret,
                         139,
                         &[h, byte, iu, mask, align],
+                    )
+                }
+                Some(_) if used.is_some_and(|u| u.stride == 0) => {
+                    let h = self.handle(site, src, false, (11 | u, 0))?;
+                    self.s.op(
+                        c,
+                        "rawBufferLoad.f32",
+                        Attr::ReadOnly,
+                        self.s.t.res_ret,
+                        139,
+                        &[h, off, iu, mask, align],
                     )
                 }
                 Some(index) => {
@@ -11151,7 +11251,7 @@ impl<'a> Lower<'a> {
                 Term::CondBr(ok, self.block[t].expect("reachable"), abort)
             }
             LaneExit::Jump(t) => {
-                self.enter_loop(b, t, self.cur);
+                self.enter_loop(t, self.cur);
                 Term::Br(self.block[t].expect("reachable"))
             }
             LaneExit::Branch {
@@ -11203,7 +11303,7 @@ impl<'a> Lower<'a> {
                         } else {
                             via
                         };
-                        self.enter_loop(b, to, from);
+                        self.enter_loop(to, from);
                     }
                 }
                 Term::CondBr(cond, t, f)
@@ -11219,14 +11319,13 @@ impl<'a> Lower<'a> {
             }
             LaneExit::Indirect => return Err(unsupported(offset, "an indirect jump")),
         };
-        let _ = Exit::End;
         self.s.m.terminate(self.cur, term);
         Ok(())
     }
 
     /// A forward edge into loop header `to` (from DXIL block `via`) starts
     /// its count at 0.
-    fn enter_loop(&mut self, _from: usize, to: usize, via: usize) {
+    fn enter_loop(&mut self, to: usize, via: usize) {
         if let Some((_, incoming)) = self.counters.get_mut(&to) {
             let z = self.s.m.i32(0);
             incoming.push((z, via));
@@ -11468,6 +11567,133 @@ fn interp_mode(kind: Barycentric) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+
+    fn lower_ps(words: &[u32]) -> Result<Lowered, crate::ShaderError> {
+        let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let native = NativeProgram {
+            stage: HwStage::Ps,
+            wave64: false,
+            vgprs: 256,
+            layout: vec![],
+            used: vec![],
+            io: StageIo::Ps {
+                inputs: vec![],
+                input_addr: 0,
+                db_shader_control: 0,
+                patches: vec![],
+            },
+            code,
+        };
+        let p = ir::build(&native.code, false, 256).unwrap();
+        let st = structure::structure(&p).unwrap();
+        let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
+        let io = io::raise(&p, &native).unwrap();
+        lower(&Parts {
+            native: &native,
+            p: &p,
+            st: &st,
+            io: &io,
+            res: &res,
+            inputs: vec![],
+            outputs: vec![],
+            prims: vec![],
+            mesh_stride: 0,
+        })
+    }
+
+    /// project-flamingo #686 (`22066e545`): in a pixel shader a bare
+    /// `v_readfirstlane_b32` keeps a helper lane's own value
+    /// (`select(isHelperLane(), own, first)`), so a waterfall loop over it
+    /// lets helper lanes leave in the first pass; compute stays bare.
+    #[test]
+    fn pixel_readfirstlane_keeps_a_helper_lanes_own_value() {
+        // v_readfirstlane_b32 s0, v0; v_mov_b32 v0, s0; s_endpgm
+        let words = [0x7E00_0500, 0x7E00_0200, S_ENDPGM];
+        let ps = lower_ps(&words).expect("pixel readfirstlane");
+        assert!(ps.wave_ops, "v_readfirstlane uses wave operations");
+        assert_eq!(
+            ps.helper_readfirst, 1,
+            "a pixel v_readfirstlane wraps isHelperLane"
+        );
+
+        let cs = lower_with(&words, vec![], vec![]).expect("compute readfirstlane");
+        assert!(cs.wave_ops);
+        assert_eq!(
+            cs.helper_readfirst, 0,
+            "a compute v_readfirstlane stays bare waveReadLaneFirst"
+        );
+    }
+
+    /// project-flamingo #720 (`7e956a90a`): a typeless RAW view bound with a
+    /// zero structure stride is a flat byte buffer, not "a structured buffer
+    /// of unknown stride": the index contributes `index * 0`, so an indexed
+    /// load, store or atomic is raw at `off`.
+    #[test]
+    fn a_zero_bound_stride_makes_an_indexed_access_raw() {
+        // s_mov_b32 s4, s0; s_load_dwordx4 s[8:11], s[4:5], null (the
+        // descriptor), then an indexed access through s[8:11]: the MUBUF
+        // opcode changes, the operands stay v0 (index), s16 (descriptor).
+        let words = [
+            0xBE84_0300, // s_mov_b32 s4, s0
+            0xBE85_0380, // s_mov_b32 s5, 0
+            0xF408_0202,
+            0xFA00_0000, // s_load_dwordx4 s[8:11], s[4:5], null
+            0xF408_0302,
+            0xFA00_0010, // s_load_dwordx4 s[12:15], s[4:5], 0x10
+            0xBF06_8001, // s_cmp_eq_u32 s1, 0
+            0x8590_0C08, // s_cselect_b64 s[16:17], s[8:9], s[12:13]
+            0x8592_0E0A, // s_cselect_b64 s[18:19], s[10:11], s[14:15]
+        ];
+        let mubuf = |opcode: u32| {
+            [
+                0xE0 << 24 | opcode << 18 | 0x2000, // idxen
+                0x8004_0100,                        // v1, s[16:19], 0
+            ]
+        };
+        let used = || {
+            vec![UsedResource {
+                kind: ResourceType::Srv,
+                root: RootType::Table,
+                table_offset_dwords: 0,
+                lower_bound: 0,
+                // A typeless RAW view: no element stride.
+                stride: 0,
+                dwords: 4,
+                user_data: 0,
+                slot: 0,
+            }]
+        };
+        let layout = || vec![root(RootType::Table, 0, 0), root(RootType::Constants, 1, 1)];
+        for (opcode, what) in [
+            (0x08, "buffer_load_ubyte"),
+            (0x0A, "buffer_load_ushort"),
+            (0x18, "buffer_store_byte"),
+            (0x1A, "buffer_store_short"),
+            (0x0C, "buffer_load_dword"),
+            (0x1C, "buffer_store_dword"),
+            (0x32, "buffer_atomic_add"),
+        ] {
+            let mut code = words.to_vec();
+            code.extend(mubuf(opcode));
+            code.extend([
+                0xD834_0000,
+                0x0000_0100, // ds_write_b32 v0, v1
+                S_ENDPGM,
+            ]);
+            lower_with(&code, layout(), used()).unwrap_or_else(|e| panic!("{what}: {e}"));
+        }
+        // The stride the console metadata declares still wins where it is a
+        // real one: 4 dwords is a structured buffer, not a raw one.
+        let mut code = words.to_vec();
+        code.extend(mubuf(0x0C));
+        code.extend([0xD834_0000, 0x0000_0100, S_ENDPGM]);
+        let structured = vec![UsedResource {
+            stride: 4,
+            ..used().remove(0)
+        }];
+        lower_with(&code, layout(), structured).expect("a structured buffer still lowers");
+    }
+
     use super::{Lowered, Numeric, Parts, buffer_format, half_shift, lower};
     use crate::native::{
         ComputeIo, HwStage, NativeProgram, ResourceType, RootParam, RootType, StageIo, UsedResource,

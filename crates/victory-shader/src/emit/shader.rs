@@ -166,6 +166,10 @@ pub(crate) struct Shader {
     /// Resource properties of each heap handle made, in creation order.
     #[cfg(test)]
     pub heap_props: Vec<(u32, u32)>,
+    #[cfg(test)]
+    pub helper_readfirst: u32,
+    #[cfg(test)]
+    pub exec_ballots: u32,
     /// A compute shader with this thread-group size.
     pub threads: Option<[u32; 3]>,
     /// The wave size a compute shader requires (`WaveSize`).
@@ -224,6 +228,10 @@ impl Shader {
             nonuniform_handles: 0,
             #[cfg(test)]
             heap_props: Vec::new(),
+            #[cfg(test)]
+            helper_readfirst: 0,
+            #[cfg(test)]
+            exec_ballots: 0,
             threads: None,
             wave_size: None,
             lds_dwords: 0,
