@@ -101,6 +101,14 @@
       "head_sha": "1e2006c16c7aeddbfa86ff853e6c13903509d520",
       "decision": "already-present",
       "reason": "Texture detile already specializes equal 8/16/32-byte runs with copy_runs."
+    },
+    {
+      "repo": "DexNom/VIctory",
+      "commit_sha": "ddb73326b09e600bd2405ee5c987fa611098aaa1",
+      "decision": "ported",
+      "feature": "Uniform static-sampler selection",
+      "reason": "Sample both constant bindings and select the texel using the original uniform branch edge. Preserve derivatives and retain unreachable-edge handling.",
+      "validation": "Synthetic regression failed before the port; victory-shader passes 184 tests with 2 ignored on Linux. GPU execution unverified."
     }
   ]
 }

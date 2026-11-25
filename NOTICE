@@ -34,3 +34,6 @@ commit 803b19b710a6731cf84d923728d8aa43b6c4f55f, and VIctory PR #2406.
 Texture hashing follows klbf-lab PR #28,
 commit 39ad8490478fa205f8f88a74acd237a1e517f97a.
 These adaptations are GPL-3.0-or-later; original authors are credited in CREDITS.md.
+
+DexNom/VIctory adaptations are GPL-3.0-or-later. Exact source commits
+and adaptation scope are recorded in CREDITS.md.

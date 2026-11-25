@@ -100,3 +100,9 @@ commit messages are the authoritative record. Named there: Geckomacabre
 
 Rust dependencies keep their own licences, recorded in `Cargo.lock` and in
 each crate's manifest. They are linked, not copied into this repository.
+
+## DexNom adaptations
+
+All entries below come from DexNom/VIctory (GPL-3.0-or-later).
+
+- Uniform static-sampler selection, commit `ddb73326b09e600bd2405ee5c987fa611098aaa1`: Sample both constant bindings and select the texel using the original uniform branch edge. Preserve derivatives and retain unreachable-edge handling.

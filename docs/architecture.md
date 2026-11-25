@@ -148,3 +148,8 @@ Texture staging uses `victory-gpu::content` for content checks. Inputs below
 1 MiB stay serial; larger inputs use BLAKE3's Rayon tree hashing with the same
 checksum. The helper's tests are portable; staging remains Windows-target
 code. This does not change the shader or pipeline cache hash algorithms.
+
+A uniform branch may select either of two static samplers. Lowering samples
+both bindings with the original derivatives and selects the result on the
+matching predecessor edge. Static sampler indices remain in the existing
+shader binding layout.

@@ -68,6 +68,9 @@ These are upstream claims, not our measurements:
 | Raw VCC scalar branches | Belobug #83 / VIctory #2406 | Makes the rule explicit even with an attached EXEC dependency |
 | Parallel large-texture content hashes | klbf-lab #28 | Portable checksum-equivalence tests pass; Windows staging call sites and runtime speed unverified |
 
+DexNom's uniform static-sampler selection is also ported. Its synthetic
+regression passes on Linux; rendered output has not been exercised.
+
 ## Pending, in priority order
 
 | Item | Upstream | Status |
