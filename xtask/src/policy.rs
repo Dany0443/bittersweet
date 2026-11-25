@@ -15,6 +15,9 @@ const MAX_ENCODED_RUN: usize = 512;
 
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "rs", "toml", "md", "txt", "lock", "yml", "yaml", "json", "hlsl", "hlsli", "ps1", "cmd", "sh",
+    // Small, hand-written vector art (the project logo). Text, and the
+    // encoded-run check below still catches an embedded payload.
+    "svg",
 ];
 const ALLOWED_NAMES: &[&str] = &[
     ".gitignore",
