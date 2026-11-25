@@ -4,3 +4,5 @@
 //! without the Windows runtime.
 
 pub mod gpu;
+
+pub mod vram;
