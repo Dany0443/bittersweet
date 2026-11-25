@@ -42,8 +42,9 @@ The Windows build inherited from upstream is unchanged in behaviour.
 | `docs/` | Architecture, upstream sync, beginner guide, asset policy |
 
 See [`docs/architecture.md`](docs/architecture.md) for the data flow and
-crate responsibilities, and [`docs/LINUX_STATUS.md`](docs/LINUX_STATUS.md)
+crate responsibilities, and [`docs/STATUS.md`](docs/STATUS.md)
 for what works, what is missing and the ported/pending Linux fixes.
+AI coding agents should follow [`AGENTS.md`](AGENTS.md).
 
 ## Quick start (Linux)
 
@@ -111,9 +112,9 @@ python3 scripts/fetch_portwatch.py
 python3 scripts/sync_upstream.py
 ```
 
-All three scripts are read-only against upstream and never push. See
-[`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md) for the manifest format,
-trust levels and bucket definitions.
+All three scripts are read-only against upstream and never push. Their
+manifest, trust and triage conventions are documented in
+[`AGENTS.md`](AGENTS.md).
 
 ## Legal
 
