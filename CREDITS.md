@@ -110,3 +110,5 @@ All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 - Restored wave64 mask recognition, commit `76749ce58da23a43a3500454a8b69c53f05aa477`: Trace both scalar-copy chains back to the same known mask in their original dword order. Reject a duplicated or replaced high dword.
 
 - Source-less VOP1 decoding, commit `496fc09e035b90dc77574a4e645f127ea3123cf8`, PR #30: Keep v_nop, v_pipeflush and v_clrexcp one dword even when unused fields resemble literal, SDWA or DPP extension markers.
+
+- VOP3 CMPX destination decoding, commit `496fc09e035b90dc77574a4e645f127ea3123cf8`, PR #30: Decode v_cmpx destinations as EXEC rather than encoded VDST. Preserve ordinary compare destinations.

@@ -126,6 +126,15 @@
       "reason": "Keep v_nop, v_pipeflush and v_clrexcp one dword even when unused fields resemble literal, SDWA or DPP extension markers.",
       "validation": "Regression failed before the port. Test all three opcodes against five extension markers, including a final instruction without a following word.",
       "pr": 30
+    },
+    {
+      "repo": "DexNom/VIctory",
+      "commit_sha": "496fc09e035b90dc77574a4e645f127ea3123cf8",
+      "decision": "ported",
+      "feature": "VOP3 CMPX destination decoding",
+      "reason": "Decode v_cmpx destinations as EXEC rather than encoded VDST. Preserve ordinary compare destinations.",
+      "validation": "Regression failed before the port. Test both wave sizes and five encoded destinations; all 187 portable shader tests pass.",
+      "pr": 30
     }
   ]
 }

@@ -361,6 +361,37 @@ mod tests {
     }
 
     #[test]
+    fn vop3_cmpx_targets_exec_in_both_wave_sizes() {
+        for wave64 in [false, true] {
+            for encoded_dst in [0, 5, 106, 126, 255] {
+                let inst =
+                    instruction(&bytes(&[0xd411_0000 | encoded_dst, 0x0001_e501]), 0).unwrap();
+                let Fields::Valu(v) = inst.fields(wave64) else {
+                    panic!("not a VALU")
+                };
+                assert_eq!(
+                    v.dst,
+                    Some(Operand::Scalar {
+                        code: 126,
+                        dwords: if wave64 { 2 } else { 1 }
+                    })
+                );
+            }
+            let inst = instruction(&bytes(&[0xd401_0005, 0x0001_e501]), 0).unwrap();
+            let Fields::Valu(v) = inst.fields(wave64) else {
+                panic!("not a VALU")
+            };
+            assert_eq!(
+                v.dst,
+                Some(Operand::Scalar {
+                    code: 5,
+                    dwords: if wave64 { 2 } else { 1 }
+                })
+            );
+        }
+    }
+
+    #[test]
     fn source_less_vop1_ignores_extension_markers() {
         for (op, name) in [(0, "v_nop"), (0x1b, "v_pipeflush"), (0x41, "v_clrexcp")] {
             for marker in [0xff, 0xf9, 0xfa, 0xe9, 0xea] {
