@@ -42,7 +42,8 @@ The Windows build inherited from upstream is unchanged in behaviour.
 | `docs/` | Architecture, upstream sync, beginner guide, asset policy |
 
 See [`docs/architecture.md`](docs/architecture.md) for the data flow and
-crate responsibilities.
+crate responsibilities, and [`docs/LINUX_STATUS.md`](docs/LINUX_STATUS.md)
+for what works, what is missing and the ported/pending Linux fixes.
 
 ## Quick start (Linux)
 
