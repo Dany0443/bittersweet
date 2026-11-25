@@ -23,6 +23,10 @@
 
 #[cfg(windows)]
 mod console_insn;
+// The crash handler walks Windows exception records and unwind data; it has
+// no meaning off Windows. bittersweet: Linux/Proton port, keep it out of the
+// build there instead of failing to resolve `windows_sys`.
+#[cfg(windows)]
 mod crash;
 pub mod prepare;
 pub mod resolve;
