@@ -117,6 +117,15 @@
       "feature": "Restored wave64 mask recognition",
       "reason": "Trace both scalar-copy chains back to the same known mask in their original dword order. Reject a duplicated or replaced high dword.",
       "validation": "Synthetic intact/corrupted-mask regression failed before the port. The portable shader suite passes on Linux; GPU execution unverified."
+    },
+    {
+      "repo": "DexNom/VIctory",
+      "commit_sha": "496fc09e035b90dc77574a4e645f127ea3123cf8",
+      "decision": "ported",
+      "feature": "Source-less VOP1 decoding",
+      "reason": "Keep v_nop, v_pipeflush and v_clrexcp one dword even when unused fields resemble literal, SDWA or DPP extension markers.",
+      "validation": "Regression failed before the port. Test all three opcodes against five extension markers, including a final instruction without a following word.",
+      "pr": 30
     }
   ]
 }
