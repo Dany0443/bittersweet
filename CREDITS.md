@@ -33,6 +33,7 @@ repository.
 | `02d62b2` | Marvisak/VIctory PR #2578 | Ignore empty log-filter variables and fall through |
 | `1fe8e03` | PastiiJay/klbf-lab PRs #7, #8 | Separate shader warm-up from pipeline pre-build; stop the input scan at its budget |
 | `f11be15` | Marvisak/VIctory PR #2334 (approach) | Gate the Windows host surface with `cfg` instead of forking the runtime |
+| `fd7beef` | PastiiJay/klbf-lab PR #12 | One latch per loop header for vkd3d-proton; larger pipeline worker stacks |
 
 ## Reference only, no code copied
 

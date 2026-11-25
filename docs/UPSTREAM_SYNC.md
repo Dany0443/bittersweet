@@ -8,6 +8,7 @@ the GitHub API, and they never push, comment or open issues.
 
 ```bash
 python3 scripts/scrape_standings.py            # refresh tracking/standings.json
+python3 scripts/fetch_portwatch.py             # cache PortWatch, merge repositories
 python3 scripts/sync_upstream.py               # discover, sync, triage
 python3 scripts/sync_upstream.py --offline-page saved.html
 ```
@@ -15,6 +16,12 @@ python3 scripts/sync_upstream.py --offline-page saved.html
 `scrape_standings.py` parses the standings table, the "also watched" list
 and the "no published work" list. It writes `tracking/standings.json` and
 does not contact GitHub.
+
+`fetch_portwatch.py` fetches the machine-readable tracker published by
+[PortWatch VI](https://portwatch-vi.xyz/), stores it as
+`tracking/portwatch.json`, merges its repositories into the manifest and
+writes `tracking/PORTWATCH.md`. It never imports PortWatch's `flagged` or
+`ignored` lists, which exist to keep malware and re-uploads out.
 
 `sync_upstream.py` compares the page with `UPSTREAM_REPOS.json`, then asks
 GitHub for the default branch, licence, archived flag, latest commits and
@@ -25,6 +32,38 @@ open pull requests of every tracked repository. It writes:
 | `UPSTREAM_REPOS.json` | The manifest: one record per repository |
 | `tracking/sync-report.json` | Machine-readable triage, per repository and in total |
 | `tracking/CHANGELOG.md` | The same report as Markdown |
+| `tracking/PORTWATCH.md` | PortWatch news, changes, nukes and toolkit digest |
+
+## Sources and trust
+
+| Source | What it contributes | Trust |
+|---|---|---|
+| Standings page | Ranked projects, "also watched", "no published work" | Vetted by the page's maintainers |
+| PortWatch `efforts` | Port projects with a public repository | Vetted by PortWatch |
+| PortWatch `tools` | Archive, texture and format tooling | Vetted by PortWatch |
+| PortWatch `candidates` | Newly found repositories | **Unreviewed**; recorded with status `candidate` and never presented as trusted |
+| PortWatch `flagged` / `ignored` | Malware, re-uploads, lookalikes | Never imported |
+
+A candidate becomes `active` when the standings page lists it or when a
+later check confirms it. A repository discovered through PortWatch is not
+expected on the standings page, so its absence there is not treated as an
+outage.
+
+## Nukes and removals
+
+PortWatch records a `nuked` date and note when a repository disappears.
+Those records are merged into the manifest and preserved:
+
+- a 404 keeps a previously nuked repository `nuked`, not `offline`;
+- a nuked repository that answers again becomes `active` and gets a
+  `restored_at` timestamp;
+- an unexpected 404 is `unreachable`, so it is visible without being
+  mistaken for a takedown;
+- a rename is recorded as `renamed` with `renamed_to`, never as a new
+  repository.
+
+DMCA entries and the tracked repositories they name are listed in
+`tracking/PORTWATCH.md`; no notice text or file is copied.
 
 ## Manifest
 
@@ -36,8 +75,11 @@ generation time and `repo_count`. Each entry in `repos` has:
 | `id` | `owner/name`, lowercased for comparison |
 | `url`, `name` | Canonical URL and display name |
 | `family`, `role` | Ecosystem grouping and the project's role in it |
-| `status` | `active`, `archived`, `offline`, `renamed` or `takedown` |
+| `status` | `active`, `archived`, `offline`, `renamed`, `nuked`, `candidate` or `unreachable` |
 | `renamed_to` | New `owner/name` when `status` is `renamed` |
+| `nuked_at`, `nuked_note` | When and why PortWatch recorded a removal |
+| `restored_at` | Set when a nuked repository answers again |
+| `portwatch` | Section, tier, GPU, approach, proof and nuke data from PortWatch |
 | `base` | True only for the snapshot this repository is built on |
 | `first_seen`, `last_sync_at` | Discovery and last successful sync |
 | `last_sync_sha` | Last commit seen at the time of the sync |

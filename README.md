@@ -38,7 +38,7 @@ The Windows build inherited from upstream is unchanged in behaviour.
 | `apps/victory` | The Windows runtime front end (`run`, `inspect`, `shader`, and the Windows-only `translate`) |
 | `setup.sh` | Idempotent Proton-GE/prefix/kernel setup |
 | `scripts/` | Read-only upstream standings scraper and repository sync |
-| `tracking/` | Latest page snapshot, triage report and generated changelog |
+| `tracking/` | Latest page snapshots, PortWatch digest, triage report and generated changelog |
 | `docs/` | Architecture, upstream sync, beginner guide, asset policy |
 
 See [`docs/architecture.md`](docs/architecture.md) for the data flow and
@@ -88,25 +88,31 @@ is `wineboot`, and only when you ask for it.
 
 ## Upstream tracking
 
-The project follows the public standings page and the repositories around
-it. Every update check:
+The project follows two public sources: the community standings page and
+[PortWatch VI](https://portwatch-vi.xyz/), which publishes a machine-readable
+tracker with effort records, tools, nuke status, DMCA entries and news.
+Every update check:
 
 1. scrapes the standings, the "also watched" list and the updates;
-2. discovers repositories that were not tracked before;
-3. flags renames, offline entries and takedowns;
-4. asks GitHub for licence, default branch, new commits and open pull
+2. fetches PortWatch's `tracker.json` and merges its vetted efforts and
+   tools, plus its unreviewed candidates marked as such;
+3. discovers repositories that were not tracked before;
+4. flags renames, nukes, offline entries, takedowns and unreachable repos;
+5. asks GitHub for licence, default branch, new commits and open pull
    requests;
-5. sorts everything into five triage buckets and writes
-   `tracking/sync-report.json` plus `tracking/CHANGELOG.md`.
+6. sorts everything into five triage buckets and writes
+   `tracking/sync-report.json`, `tracking/CHANGELOG.md` and
+   `tracking/PORTWATCH.md`.
 
 ```bash
 python3 scripts/scrape_standings.py
+python3 scripts/fetch_portwatch.py
 python3 scripts/sync_upstream.py
 ```
 
-Both scripts are read-only against upstream and never push. See
-[`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md) for the manifest format and
-the bucket definitions.
+All three scripts are read-only against upstream and never push. See
+[`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md) for the manifest format,
+trust levels and bucket definitions.
 
 ## Legal
 
