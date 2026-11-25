@@ -1324,20 +1324,22 @@ impl<'a> Lanes<'a> {
     }
 
     fn branch(&mut self, inst: &Inst) -> Bool {
-        let exec = self.exec(inst);
         match inst.name() {
-            "s_cbranch_execz" => self.b.not(exec),
-            "s_cbranch_execnz" => exec,
+            "s_cbranch_execz" => {
+                let exec = self.exec(inst);
+                self.b.not(exec)
+            }
+            "s_cbranch_execnz" => self.exec(inst),
+            // Belobug #83 / VIctory #2406: scalar branches test raw VCC.
             n @ ("s_cbranch_vccz" | "s_cbranch_vccnz") => {
                 let vcc = match self.key(|r| inst.read(r), VCC) {
                     Some(k) => self.mask(k).0,
                     None => Bool::FALSE,
                 };
-                let any = self.b.and(vcc, exec);
                 if n.ends_with("nz") {
-                    any
+                    vcc
                 } else {
-                    self.b.not(any)
+                    self.b.not(vcc)
                 }
             }
             n => {
@@ -1419,6 +1421,82 @@ fn check_reducible(p: &Program, order: &[usize], index: &[usize]) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn vcc_branch_keeps_bits_when_exec_is_empty() {
+        for (branch, expected) in [(0xBF87_0001, Bool::TRUE), (0xBF86_0001, Bool::FALSE)] {
+            let mut p = build(
+                &[
+                    0xBEFE_0380, // s_mov_b32 exec_lo, 0
+                    0xBEEA_03C1, // s_mov_b32 vcc_lo, -1
+                    branch,
+                    0x7E02_0280,
+                    S_ENDPGM,
+                ],
+                false,
+            );
+            // The current IR omits EXEC from VCC branch reads. Preserve raw
+            // VCC semantics even if an analysis attaches the current EXEC.
+            let exec = p.blocks[0].insts[0].write(Reg::S(EXEC)).unwrap();
+            p.blocks[0]
+                .insts
+                .last_mut()
+                .unwrap()
+                .reads
+                .push((Reg::S(EXEC), exec));
+            let st = structure(&p).unwrap();
+            assert!(
+                matches!(st.exits[0], LaneExit::Branch { when, .. } if when == expected),
+                "raw VCC branch {branch:#x}: {:?}",
+                st.exits[0]
+            );
+        }
+    }
+
+    #[test]
+    fn cbranch_vcc_tests_raw_vcc_without_exec_masking() {
+        // Under narrowed EXEC (`v_cmpx_eq_u32`), an explicit scalar write to
+        // `vcc_lo` followed by `s_cbranch_vccnz` / `s_cbranch_vccz` tests raw
+        // VCC (`TRUE` for -1, `FALSE` for 0) rather than `VCC & EXEC`.
+        let p_nz = build(
+            &[
+                0x7DA4_0080, // v_cmpx_eq_u32 exec, 0, v0
+                0xBEEA_03C1, // s_mov_b32 vcc_lo, -1
+                0xBF87_0001, // s_cbranch_vccnz -> 16
+                0x7E02_0280, // v_mov_b32 v1, 0
+                S_ENDPGM,    // 16
+            ],
+            false,
+        );
+        let s_nz = structure(&p_nz).unwrap();
+        assert!(matches!(
+            s_nz.exits[0],
+            LaneExit::Branch {
+                when: Bool::TRUE,
+                ..
+            }
+        ));
+
+        let p_z = build(
+            &[
+                0x7DA4_0080, // v_cmpx_eq_u32 exec, 0, v0
+                0xBEEA_0380, // s_mov_b32 vcc_lo, 0
+                0xBF86_0001, // s_cbranch_vccz -> 16
+                0x7E02_0280, // v_mov_b32 v1, 0
+                S_ENDPGM,    // 16
+            ],
+            false,
+        );
+        let s_z = structure(&p_z).unwrap();
+        assert!(matches!(
+            s_z.exits[0],
+            LaneExit::Branch {
+                when: Bool::TRUE,
+                ..
+            }
+        ));
+    }
+
     use super::*;
     use crate::ir;
 
