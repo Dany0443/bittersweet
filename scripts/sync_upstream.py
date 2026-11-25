@@ -193,13 +193,30 @@ def collect(repo: dict, since: dt.datetime, pr_limit: int) -> dict:
     result = {"id": rid, "commits": [], "prs": [], "buckets": {b: 0 for b in BUCKETS},
               "unclassified": 0, "hold": [], "notes": []}
     if not meta:
-        result["status"] = "unreachable"
+        # A previously nuked repository stays nuked when GitHub still answers
+        # 404; anything else is an outage to investigate.
+        if repo.get("status") == "nuked":
+            result["status"] = "nuked"
+        else:
+            result["status"] = "unreachable"
+            repo["status"] = "unreachable"
         return result
 
     actual = meta.get("full_name", rid)
     if actual.lower() != rid.lower():
         result["renamed_to"] = actual
-    repo["status"] = "renamed" if result.get("renamed_to") else "active"
+    if result.get("renamed_to"):
+        repo["status"] = "renamed"
+    elif meta.get("archived"):
+        repo["status"] = "archived"
+    elif repo.get("status") == "nuked":
+        # It came back: record the recovery instead of keeping a stale nuke.
+        repo["status"] = "active"
+        repo["restored_at"] = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+    elif repo.get("status") == "candidate" and not repo.get("on_page"):
+        repo["status"] = "candidate"
+    else:
+        repo["status"] = "active"
     repo["default_branch"] = meta.get("default_branch")
     lic = (meta.get("license") or {}).get("spdx_id")
     if lic and lic != "NOASSERTION":
@@ -306,7 +323,14 @@ def main(argv: list[str]) -> int:
                 repo["status"] = "active"
         else:
             repo["on_page"] = False
-            if repo.get("status") not in ("renamed", "takedown"):
+            # A repository discovered through PortWatch is not expected on
+            # the standings page; its absence there is not an outage.
+            if repo.get("status") in ("nuked", "candidate", "renamed", "takedown"):
+                pass
+            elif repo.get("portwatch"):
+                if repo.get("status") == "offline":
+                    repo["status"] = "active"
+            else:
                 repo["status"] = "offline"
 
     since = dt.datetime.fromisoformat(args.since.replace("Z", "+00:00")) if args.since else None
@@ -384,6 +408,24 @@ def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime
         out += [f"- `{i}`" for i in report["unreachable"]]
         out.append("")
 
+    portwatch = [r for r in manifest["repos"] if r.get("portwatch")]
+    if portwatch:
+        counts: dict[str, int] = {}
+        for r in portwatch:
+            section = (r.get("portwatch") or {}).get("section") or "unknown"
+            counts[section] = counts.get(section, 0) + 1
+        out += ["## Tracked through PortWatch VI", "",
+                "| Section | Repositories |", "|---|---:|"]
+        for section in ("efforts", "tools", "candidates"):
+            out.append(f"| {section} | {counts.get(section, 0)} |")
+        out.append("")
+        out.append("`candidates` are unreviewed and are not presented as trusted.")
+        nuked = [r for r in portwatch if r.get("status") == "nuked"]
+        if nuked:
+            out.append("")
+            out.append("Nuked or deleted: " + ", ".join(f"`{r['id']}`" for r in nuked) + ".")
+        out.append("")
+
     out += ["## Triage totals", "", "| Bucket | Items |", "|---|---|"]
     for b in BUCKETS + ["unclassified"]:
         out.append(f"| {b} | {report['totals'].get(b, 0)} |")
@@ -408,7 +450,7 @@ def write_changelog(path: Path, report: dict, manifest: dict, since: dt.datetime
                     rows.append(f"- `{r['id']}` `{c['sha']}` — {c['message']}")
         out += (rows[:80] if rows else ["_No items this window._"])
         if len(rows) > 80:
-            out.append(f"- …and {len(rows) - 80} more (see `data/sync-report.json`)")
+            out.append(f"- …and {len(rows) - 80} more (see `tracking/sync-report.json`)")
         out.append("")
 
     out += ["## Per-repository activity", "",
