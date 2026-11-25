@@ -3,6 +3,23 @@ resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 # Fixtures are standalone crates built on demand by integration tests.
 exclude = ["tests/fixtures"]
+# Linux hosts build and test the portable half of the workspace: PE and
+# format readers, the shader translator, the pipeline format, and the
+# bittersweet host layer.  The D3D12 runtime (victory-gpu/victory-hle and
+# the `victory` app) is Windows-target code; Scarlight and TuxBox cross-build
+# theirs with `cargo xwin`.  Keep `cargo build`/`cargo test` green on Linux
+# without pretending the Windows half was ported.
+default-members = [
+    "crates/victory-core",
+    "crates/victory-pe",
+    "crates/victory-shader",
+    "crates/victory-formats",
+    "crates/victory-pipeline",
+    "crates/victory-game",
+    "crates/bittersweet-host",
+    "apps/bittersweet",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
