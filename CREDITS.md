@@ -35,6 +35,46 @@ repository.
 | `f11be15` | Marvisak/VIctory PR #2334 (approach) | Gate the Windows host surface with `cfg` instead of forking the runtime |
 | `fd7beef` | PastiiJay/klbf-lab PR #12 | One latch per loop header for vkd3d-proton; larger pipeline worker stacks |
 
+## Adaptations on main
+
+- [Belobug/VIctory-Belobug-AMD PR #70](https://github.com/Belobug/VIctory-Belobug-AMD/pull/70),
+  head `98ec4ec1805bfd0428221dd133e1cabdd6ceaec1`: partial shader-translator
+  cleanup in `emit/lower.rs`. Removed the f16 conversion arms already handled
+  by `valu16`, unused loop-entry argument, and no-op bindings. Retained
+  `Module::int_value`: unlike the PR's base, our memory lowering still calls it.
+  The PR's integer-dot and half-input changes do not apply to this snapshot.
+  GPL-3.0-or-later, with the upstream authors' notices retained.
+- Belobug PR #7's console formats 189–191 and the synthetic layout test
+  already exist in the inherited base; no duplicate port was applied.
+
+### Shader and texture ports
+
+- **pablogonz12/Scarlight PR #103**, head
+  `dcf0723e38506a96b9d631e2a32a489fa9d511f6` (pablogonz12), partially
+  adapted from **JMAN730/project-flamingo** (GPL-3.0-or-later):
+  - #684, `19dda7a549c35e194ee8399e01fa6a1b23b649a2`: DPP fetch-inactive
+    and bound-control handling.
+  - #697, `7b3b668599ae9f97e4dc1d71ba5e0d26bd3892bd`: zero inactive
+    `ds_swizzle_b32` source lanes.
+  - #686, `22066e545810775d9e9f064f5159178838067964`: pixel helper lanes
+    use their own value for first-lane reads.
+  - #720, `7e956a90af57653800bd2a80eafc8e979ba81f9c` (axknxla): zero
+    bound stride means raw byte addressing for indexed buffer operations.
+  Local adaptation ballots the structurised EXEC guard, and keeps mesh quad
+  activity checks quad-local. The pixel Valid-Mask/export rewrite is not part
+  of this port. Synthetic shader tests run on Linux; GPU execution is unverified.
+- **Belobug/VIctory-Belobug-AMD PR #83**, head
+  `803b19b710a6731cf84d923728d8aa43b6c4f55f` (dutch2005), from
+  **Marvisak/VIctory #2406** (makmatvey): test raw VCC independently of EXEC
+  in scalar VCC branches. Our IR already omitted EXEC from those reads;
+  an additional regression covers an explicit EXEC dependency.
+- **PastiiJay/klbf-lab PR #28**, head
+  `39ad8490478fa205f8f88a74acd237a1e517f97a` (spy0eye-beep): parallel
+  BLAKE3 texture-content checks at 1 MiB and above, with serial checks below.
+  The helper is portable and checksum-equivalence tests run on Linux; the
+  four texture-runtime call sites remain Windows-target code. No title or
+  frame-time measurement was performed. GPL-3.0-or-later.
+
 ## Reference only, no code copied
 
 | Project | Licence | Used for |

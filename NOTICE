@@ -22,3 +22,15 @@ of their respective owners and are used only to describe compatibility.
 This repository contains no game assets, retail executables, console SDK
 libraries, keys or other proprietary material. It operates only on files
 the user supplies at runtime.
+
+Shader-translator cleanup adapted in part from Belobug/VIctory-Belobug-AMD
+PR #70, commit 98ec4ec1805bfd0428221dd133e1cabdd6ceaec1
+(GPL-3.0-or-later). See CREDITS.md for the retained local differences.
+
+Shader lane and raw-buffer behavior adapted from Scarlight PR #103,
+commit dcf0723e38506a96b9d631e2a32a489fa9d511f6, and the project-flamingo
+commits credited in CREDITS.md. Raw-VCC branching follows Belobug PR #83,
+commit 803b19b710a6731cf84d923728d8aa43b6c4f55f, and VIctory PR #2406.
+Texture hashing follows klbf-lab PR #28,
+commit 39ad8490478fa205f8f88a74acd237a1e517f97a.
+These adaptations are GPL-3.0-or-later; original authors are credited in CREDITS.md.

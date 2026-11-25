@@ -69,6 +69,11 @@ reads the Linux host. It turns a probe into an ordered environment:
    apps/bittersweet: doctor, plan, check, pipeline
 ```
 
+The probe prefers the DRM card with the most reported VRAM, with stable
+card-name order for ties or unknown values. This chooses the host policy
+profile; it does not bind a Vulkan device or override Proton GPU selection.
+The synthetic probe tests include an integrated GPU beside a discrete GPU.
+
 The Windows runtime is still Windows-target code. On Linux it builds
 because its host surface is gated with `cfg(windows)`; the Linux host layer
 does not replace that surface yet. `Cargo.toml` lists the portable crates
@@ -132,3 +137,14 @@ the lanes take, from structurisation), and accessed with a non-uniform heap
 index in one pass. `victory translate`
 runs every shader it finds (containers, SGD5 files) through these and
 lists what they cannot handle yet.
+
+The portable lowering also handles DPP fetch-inactive semantics and inactive
+swizzle sources using the structurised EXEC guard. Pixel helper lanes take
+their own first-lane value so descriptor waterfalls can finish. Zero-stride
+indexed buffer operations address raw bytes at the instruction's offset.
+These paths have synthetic Linux tests; host GPU execution is not verified.
+
+Texture staging uses `victory-gpu::content` for content checks. Inputs below
+1 MiB stay serial; larger inputs use BLAKE3's Rayon tree hashing with the same
+checksum. The helper's tests are portable; staging remains Windows-target
+code. This does not change the shader or pipeline cache hash algorithms.

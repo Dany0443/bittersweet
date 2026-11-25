@@ -64,6 +64,9 @@ These are upstream claims, not our measurements:
 | `cfg` gates, not a fork | VIctory #2334 approach | Keeps one tree for Windows and Linux |
 | One latch per loop | klbf-lab #12 | vkd3d-proton recurses forever on multiple back edges |
 | Larger pipeline stacks | klbf-lab #12 | DXIL conversion overflows 2 MiB and hangs under Wine |
+| DPP inactive-source handling, swizzle zeros, helper-lane reads, zero-stride raw buffers | Scarlight #103 / project-flamingo #684, #697, #686, #720 | Partial port; synthetic Linux lowering tests pass, host GPU execution unverified |
+| Raw VCC scalar branches | Belobug #83 / VIctory #2406 | Makes the rule explicit even with an attached EXEC dependency |
+| Parallel large-texture content hashes | klbf-lab #28 | Portable checksum-equivalence tests pass; Windows staging call sites and runtime speed unverified |
 
 ## Pending, in priority order
 

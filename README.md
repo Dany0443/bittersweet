@@ -26,7 +26,11 @@ This is a work in progress. Be clear about what works today:
   functional under Proton. Do not expect a playable frame rate from this
   tree; that is the next milestone.
 
-The Windows build inherited from upstream is unchanged in behaviour.
+The inherited runtime receives attributed shader and texture ports. Recent
+changes correct helper-lane reads, inactive-lane swizzles, DPP fetch-inactive
+handling and zero-stride raw-buffer accesses. Large texture-content checks
+use parallel BLAKE3 with identical checksums. Synthetic tests run on Linux;
+these checks do not establish title compatibility or frame-time gains.
 
 ## Layout
 
@@ -66,7 +70,10 @@ cargo run -p bittersweet -- plan --write .runtime
 cargo run -p bittersweet -- check --cache
 ```
 
-`doctor` reads `/sys`, `/proc` and `/etc/os-release` only. `plan` writes
+`doctor` reads `/sys`, `/proc` and `/etc/os-release` only. On multi-GPU
+hosts it plans for the DRM card with the most reported VRAM, so a small
+integrated GPU does not hide a discrete card. This is a planning heuristic;
+it does not select the rendering device in Proton. `plan` writes
 `.runtime/bittersweet.env`, a shell-sourceable file with the cache paths,
 VRAM budget, wave policy and vendor flags. Neither opens a game binary.
 
@@ -102,7 +109,8 @@ Every update check:
 4. flags renames, nukes, offline entries, takedowns and unreachable repos;
 5. asks GitHub for licence, default branch, new commits and open pull
    requests;
-6. sorts everything into five triage buckets and writes
+6. reads every page of commits and open PRs, flags timeout/device-loss
+   mentions for review, then sorts items into five triage buckets and writes
    `tracking/sync-report.json`, `tracking/CHANGELOG.md` and
    `tracking/PORTWATCH.md`.
 
@@ -111,6 +119,18 @@ python3 scripts/scrape_standings.py
 python3 scripts/fetch_portwatch.py
 python3 scripts/sync_upstream.py
 ```
+
+The unified sync refreshes both feeds itself, so a direct invocation cannot
+silently use a stale PortWatch snapshot. For saved inputs, use
+`--offline-page saved.html --offline-portwatch saved-tracker.json`.
+`--pr-limit` controls page size (1–100), not total PR coverage. API failures
+are reported as incomplete and preserve the repository's sync checkpoint.
+Buckets and hold flags are automated screening; source review and focused
+tests are required before any port. Mentioning a timeout may describe a fix,
+so a hold flag requires review rather than proving a regression.
+
+Run offline tracking regression tests with
+`python3 -m unittest discover -s scripts -p 'test_*.py'`.
 
 All three scripts are read-only against upstream and never push. Their
 manifest, trust and triage conventions are documented in
