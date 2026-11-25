@@ -9,6 +9,7 @@ mod inspect;
 mod prebuild;
 mod run;
 mod shader;
+#[cfg(windows)]
 mod translate;
 
 use std::path::PathBuf;
@@ -70,7 +71,9 @@ enum Command {
         disasm: bool,
     },
     /// Run every shader found (containers, SGD5 files) through the
-    /// translator and report what it cannot handle yet.
+    /// translator and report what it cannot handle yet. The host DXIL
+    /// validator and pipeline builder are Windows-only.
+    #[cfg(windows)]
     Translate {
         paths: Vec<PathBuf>,
         /// Check emitted DXIL with dxil.dll's validator (`VICTORY_DXIL`,
@@ -160,6 +163,7 @@ fn main() -> Result<()> {
             cache: true,
             ..
         } => prebuild::run(paths, jobs),
+        #[cfg(windows)]
         Command::Translate {
             paths,
             validate,
