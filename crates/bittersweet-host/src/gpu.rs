@@ -83,8 +83,9 @@ pub fn amd_family(device: u16) -> AmdFamily {
             // A few well-known ids, for a readable report. Policy does not
             // depend on the distinction between RDNA2, 3 and 4.
             0x73bf => AmdFamily::Rdna2Plus, // Navi 21
-            0x744c => AmdFamily::Rdna2Plus, // Navi 31
-            0x7550 => AmdFamily::Rdna2Plus, // Navi 48 (RX 9070 XT)
+            // RX 7000 ids, also listed in libdrm's amdgpu.ids.
+            0x744c | 0x747e | 0x7480 => AmdFamily::Rdna2Plus, // Navi 31/32/33
+            0x7550 => AmdFamily::Rdna2Plus,                   // Navi 48 (RX 9070 XT)
             _ => AmdFamily::Unknown,
         },
     }
@@ -177,6 +178,9 @@ mod tests {
         assert_eq!(amd_family(0x687f), AmdFamily::Gcn);
         assert_eq!(amd_family(0x731f), AmdFamily::Rdna1);
         assert_eq!(amd_family(0x7550), AmdFamily::Rdna2Plus);
+        assert_eq!(amd_family(0x744c), AmdFamily::Rdna2Plus);
+        assert_eq!(amd_family(0x747e), AmdFamily::Rdna2Plus);
+        assert_eq!(amd_family(0x7480), AmdFamily::Rdna2Plus);
         assert_eq!(Vendor::from_pci(0x1002), Vendor::Amd);
         assert_eq!(Vendor::from_pci(0x10de), Vendor::Nvidia);
         assert_eq!(Vendor::from_pci(0x1234), Vendor::Other(0x1234));

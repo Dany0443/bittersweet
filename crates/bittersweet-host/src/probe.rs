@@ -54,9 +54,10 @@ fn read_u64(path: &Path) -> Option<u64> {
     read_trim(path)?.parse().ok()
 }
 
-/// Find the first `cardN` under `<root>/sys/class/drm` that has a device
-/// directory. Connector entries (`card0-DP-1`) are skipped.
-fn first_card(root: &Path) -> Option<PathBuf> {
+/// Prefer the card with the most reported VRAM, so an integrated GPU does
+/// not hide a discrete adapter. Ties and unknown VRAM keep card-name order.
+/// Connector entries (`card0-DP-1`) are skipped.
+fn preferred_card(root: &Path) -> Option<PathBuf> {
     let drm = root.join("sys/class/drm");
     let mut cards: Vec<PathBuf> = std::fs::read_dir(&drm)
         .ok()?
@@ -69,7 +70,16 @@ fn first_card(root: &Path) -> Option<PathBuf> {
         })
         .collect();
     cards.sort();
-    cards.into_iter().find(|p| p.join("device").is_dir())
+    let mut best = None;
+    let mut most_vram = 0;
+    for card in cards.into_iter().filter(|p| p.join("device").is_dir()) {
+        let vram = read_u64(&card.join("device/mem_info_vram_total")).unwrap_or(0);
+        if best.is_none() || vram > most_vram {
+            most_vram = vram;
+            best = Some(card);
+        }
+    }
+    best
 }
 
 fn parse_os_release(path: &Path) -> Option<String> {
@@ -90,7 +100,7 @@ pub fn probe_from(root: &Path) -> HostReport {
         distro: parse_os_release(&root.join("etc/os-release")),
         ..HostReport::default()
     };
-    let Some(card) = first_card(root) else {
+    let Some(card) = preferred_card(root) else {
         return report;
     };
     let device_dir = card.join("device");
@@ -171,6 +181,26 @@ mod tests {
         assert_eq!(r.max_map_count, Some(1_048_576));
         assert_eq!(r.kernel.as_deref(), Some("6.12.1-test"));
         assert_eq!(r.distro.as_deref(), Some("Test Linux"));
+    }
+
+    #[test]
+    fn prefers_the_larger_card_over_the_integrated_gpu() {
+        let f = Fixture::new();
+        f.write("sys/class/drm/card0/device/vendor", "0x1002");
+        f.write("sys/class/drm/card0/device/device", "0x164e");
+        f.write(
+            "sys/class/drm/card0/device/mem_info_vram_total",
+            "536870912",
+        );
+        f.write("sys/class/drm/card1/device/vendor", "0x1002");
+        f.write("sys/class/drm/card1/device/device", "0x744c");
+        f.write(
+            "sys/class/drm/card1/device/mem_info_vram_total",
+            "25769803776",
+        );
+        let r = probe_from(&f.0);
+        assert_eq!(r.device, 0x744c);
+        assert_eq!(r.vram_mb, 24576);
     }
 
     #[test]

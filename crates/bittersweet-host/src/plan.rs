@@ -391,6 +391,29 @@ mod tests {
     }
 
     #[test]
+    fn rdna3_and_rdna1_keep_their_vram_and_mesh_policies() {
+        for (device, vram, mesh, budget, bias) in [
+            (0x744c, 24576, "1", 18432, 0),
+            (0x7480, 8192, "1", 4915, 1),
+            (0x731f, 8192, "0", 4915, 1),
+        ] {
+            let plan = plan_for_ids(0x1002, device, vram, Path::new("/tmp/bs"));
+            let get = |key: &str| {
+                plan.env
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, v)| v.as_str())
+            };
+            assert_eq!(get("BITTERSWEET_MESH_PIPELINES"), Some(mesh));
+            assert_eq!(get("BITTERSWEET_WAVE64"), Some("native"));
+            assert_eq!(get("MESA_SHADER_CACHE_MAX_SIZE"), Some("12G"));
+            assert_eq!(get("AMD_VULKAN_ICD"), Some("RADV"));
+            assert_eq!(plan.budget.texture_mb, budget);
+            assert_eq!(plan.budget.mip_bias, bias);
+        }
+    }
+
+    #[test]
     fn a_vega_plan_refuses_mesh_and_lowers_vram_uploads() {
         let plan = plan_for_ids(0x1002, 0x687f, 8192, Path::new("/tmp/bs"));
         let get = |k: &str| {
