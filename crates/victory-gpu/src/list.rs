@@ -1815,7 +1815,7 @@ impl ValueWait {
         // report "not held" rather than pretend to read zeros.
         #[cfg(not(windows))]
         {
-            return false;
+            false
         }
         #[cfg(windows)]
         {
