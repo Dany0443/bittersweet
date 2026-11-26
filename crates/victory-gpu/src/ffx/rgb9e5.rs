@@ -47,14 +47,6 @@ struct Packer {
     pipeline: ID3D12PipelineState,
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn rgb9e5_pipeline_builds() {
-        super::make_packer().expect("RGB9E5 pipeline");
-    }
-}
-
 // SAFETY: the immutable D3D12 root signature and pipeline are free-threaded.
 unsafe impl Send for Packer {}
 // SAFETY: as above.
@@ -385,10 +377,17 @@ impl Output {
     }
 }
 
-#[cfg(all(test, feature = "diagnostics"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(feature = "diagnostics")]
     use super::*;
 
+    #[test]
+    fn rgb9e5_pipeline_builds() {
+        super::make_packer().expect("RGB9E5 pipeline");
+    }
+
+    #[cfg(feature = "diagnostics")]
     #[test]
     fn packs_hdr_pixels_into_a_sampleable_rgb9e5_texture() {
         let host = host().expect("D3D12 device for the RGB9E5 test");
