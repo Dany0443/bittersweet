@@ -82,6 +82,17 @@ const fn buffer_store_dword(vdata: u8, srsrc: u8, byte_off: u16) -> [u32; 2] {
     ]
 }
 
+/// MTBUF `op vdata, off, s[srsrc:srsrc+3], 0 format:format` (at byte 0).
+const fn mtbuf(op: u8, vdata: u8, srsrc: u8, format: u8) -> [u32; 2] {
+    [
+        0x3A << 26 | (format as u32 & 0x7F) << 19 | (op as u32 & 7) << 16,
+        0x80 << 24
+            | (op as u32 >> 3 & 1) << 21
+            | (srsrc as u32 >> 2 & 0x1F) << 16
+            | (vdata as u32) << 8,
+    ]
+}
+
 const fn sgpr(n: u8) -> u16 {
     n as u16
 }
@@ -133,6 +144,12 @@ fn a_group_number_in_x_counts_from_the_host_s_first_group() {
 /// `v0`), and stores `v0` to dword 0 of the raw UAV at heap index 0.
 fn build_valu_cs(body: &[u32]) -> HostShader {
     build_cs(body, 1, 0)
+}
+
+fn tbuffer_load_of_v1(op: u8, format: u8) -> HostShader {
+    let mut body = buffer_store_dword(1, 8, 0).to_vec();
+    body.extend(mtbuf(op, 0, 8, format));
+    build_valu_cs(&body)
 }
 
 #[test]
@@ -401,6 +418,72 @@ fn f16_to_f32(bits: u16) -> f32 {
         _ => sign | ((u32::from(exp) + 112) << 23) | (u32::from(mant) << 13),
     };
     f32::from_bits(f32_bits)
+}
+
+fn normalized_codes(bits: u32) -> Vec<u32> {
+    if bits <= 10 {
+        return (0..(1 << bits)).collect();
+    }
+    let edges = [
+        1, 2, 3, 255, 256, 257, 261, 265, 269, 511, 512, 1000, 0x7FFF, 0x8000, 0x8001, 0xFFFE,
+        0xFFFF,
+    ];
+    (0..=0xFFFF).step_by(257).chain(edges).collect()
+}
+
+#[test]
+fn normalized_buffer_formats_load_correctly_rounded_quotients() {
+    let x = 0;
+    for (format, bits, signed) in [
+        (1u8, 8u32, false),
+        (7, 16, false),
+        (2, 8, true),
+        (8, 16, true),
+        (50, 10, false),
+        (51, 10, true),
+    ] {
+        let shader = tbuffer_load_of_v1(x, format);
+        let cases: Vec<[u32; 4]> = normalized_codes(bits)
+            .into_iter()
+            .map(|code| [code, 0, 0, 0])
+            .collect();
+        run_cases(&shader, &cases, |backend, _, [code, ..], got| {
+            let want = if signed {
+                let top = (1i32 << (bits - 1)) - 1;
+                let value = ((code << (32 - bits)) as i32) >> (32 - bits);
+                (value.max(-top) as f32 / top as f32).to_bits()
+            } else {
+                (code as f32 / ((1u32 << bits) - 1) as f32).to_bits()
+            };
+            assert_eq!(
+                got, want,
+                "{backend}: {bits}-bit normalized {code:#x} = {got:#010x}, want {want:#010x}"
+            );
+        });
+    }
+}
+
+#[test]
+fn normalized_codes_truncate_back_to_themselves() {
+    let x = 0;
+    for (format, bits) in [(1u8, 8u32), (7, 16)] {
+        let scale = (((1u32 << bits) - 1) as f32).to_bits();
+        let mut body = buffer_store_dword(1, 8, 0).to_vec();
+        body.extend(mtbuf(x, 0, 8, format));
+        body.extend([0x07 << 25 | 0xFF, scale]);
+        body.push(vop1(0x07, 0, vgpr(0)));
+        let shader = build_valu_cs(&body);
+        let cases: Vec<[u32; 4]> = normalized_codes(bits)
+            .into_iter()
+            .map(|code| [code, 0, 0, 0])
+            .collect();
+        run_cases(&shader, &cases, |backend, _, [code, ..], got| {
+            assert_eq!(
+                got, code,
+                "{backend}: {bits}-bit code {code} returns as {got}"
+            );
+        });
+    }
 }
 
 #[test]
