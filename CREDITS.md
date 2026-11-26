@@ -98,6 +98,11 @@ repository.
   commit is also present in the high-rated Belobug AMD fork. Linux lowering
   tests cover translation, with runtime cases for Windows GPU/WARP. No RX
   hardware run was performed. GPL-3.0-or-later.
+- **fxceless/victory-fork**, commit `06702fe86b91bacbf4a0a27662ae443435bf732e`:
+  BC7 rotation handling from upstream VIctory #3111. Rotation control bits
+  affect channel precision and endpoint order only in modes 4 and 5. Added a
+  regression covering reserved bits in the other modes and actual channel
+  swaps in modes 4 and 5. GPL-3.0-or-later.
 
 ## Reference only, no code copied
 
