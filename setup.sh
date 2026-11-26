@@ -266,7 +266,7 @@ cat > "$RUNTIME/prefix.env" <<EOF
 export STEAM_COMPAT_DATA_PATH="$PREFIX"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$RUNTIME/steam-client"
 export WINEPREFIX="$PREFIX/pfx"
-export WINEDLLOVERRIDES="d3d12,d3d11,dxgi=n,b"
+export WINEDLLOVERRIDES="d3d12,d3d12core,d3d11,dxgi=n,b"
 export WINE_LARGE_ADDRESS_AWARE="1"
 export PROTON_LOG_DIR="$RUNTIME/proton-logs"
 EOF
