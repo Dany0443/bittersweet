@@ -13,17 +13,21 @@ should research current upstream sources when a task depends on them.
 | Host probe | `bittersweet doctor` reads sysfs, procfs and `/etc/os-release` only |
 | Host plan | `bittersweet plan` writes cache paths, VRAM budget, wave policy, vendor flags |
 | Setup | `setup.sh` prepares Proton-GE, prefix and `vm.max_map_count`; idempotent |
-| Windows runtime | Compiles on Linux after `cfg` gates; **not functional under Proton** |
+| Windows runtime | Windows-target release cross-builds on Linux; account/player prompt rendered under GE-Proton11-12 |
+| First mission | Not verified; startup failed after compressed source reads encountered zero-filled data |
 
-The last row is the important one. A green build means the code is
-portable, not that the title runs.
+Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
+Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
+account/player prompt rendered after the presentation fixes. Synthetic GPU
+tests under Proton create both compositor and both depth-helper pipelines.
+These observations do not establish mission compatibility or world frame times.
 
 ## What is missing
 
-1. **A Linux graphics backend.** The runtime still creates host D3D12
-   objects through Windows APIs. Under Proton those calls must reach
-   vkd3d-proton; on native Linux they must reach Vulkan. The gates only
-   keep the Windows path from breaking the Linux build.
+1. **Mission-level execution evidence.** Proton reaches the account/player
+   prompt. The next local attempt failed after two compressed reads found
+   zero-filled source data. Independent reads and decompression reproduced
+   the invalid data. No game files were modified or added to the repository.
 2. **Wine memory semantics.** Title memory is not always mapped in place
    under Wine. Upstream builds copy it, and one class of copies must not be
    sparse buffers or the GPU resets when the world loads.
@@ -33,8 +37,9 @@ portable, not that the title runs.
 4. **Shader-conversion recursion limits.** vkd3d-proton converts DXIL on
    the calling thread; large traversal programs need one latch per loop and
    a larger worker stack.
-5. **A real run.** No one has run this tree against a user-supplied copy
-   under Proton. That is deliberate until the backend exists.
+5. **World rendering and input validation.** Startup runs under Proton, but
+   mission loading, world rendering, memory pressure and sustained input
+   still need end-to-end verification.
 
 ## Ported here
 
@@ -63,15 +68,15 @@ changes and title execution remain unverified.
 | Item | Upstream | Status |
 |---|---|---|
 | Save the early list when there is no host library | victory-fork #259 | Not ported; Windows-only code, needs a Windows build to verify |
-| Root signature made beside Wine-compiled HLSL | victory-fork #1011 | Not ported; Windows-only |
+| Root signature made beside Wine-compiled HLSL | victory-fork #1011 | Compositor and depth helpers ported and tested under Proton; indirect rewrite pending |
 | Compile runtime HLSL with DXC when the system compiler refuses | victory-fork #20 | Not ported; Windows-only |
 | Depth twin's root signature when the compiler drops it | VIctory #1872 | Not ported; Windows-only |
 | Title memory copied, not in place, under Wine | Belobug #53 | Not ported; needs the Linux backend first |
 | Non-sparse copies under Wine | Belobug #69 | Not ported; same |
 | Empty host library from a null blob | Belobug #124 | Not ported; same |
 
-The Windows-only items are deliberately queued behind a Windows build.
-Porting them blind would add code we cannot compile or test on this host.
+Windows-target checks and Proton GPU tests are now available on this host.
+Remaining ports need focused regressions and runtime evidence.
 
 ## Risk register
 
@@ -84,13 +89,7 @@ Porting them blind would add code we cannot compile or test on this host.
 
 ## Next milestones
 
-1. Define the Linux device boundary: one trait for device, queue, list,
-   resource and descriptor operations, with a Windows implementation and a
-   Vulkan implementation behind it.
-2. Move title-memory mapping behind that boundary, including the copied
-   and non-sparse cases.
-3. Make the pipeline cache work with vkd3d-proton's refusal path.
-4. Run the portable shader translator over user-supplied shader data and
-   record reproducible results.
-5. Only then attempt a Proton run, with a user-supplied copy, and publish
-   the log with the same care as the upstream test reports.
+1. Resume mission loading with valid user-supplied source data.
+2. Fix observed shader, storage and GPU failures with focused regressions.
+3. Verify mission rendering, input and memory use under Proton.
+4. Validate cache behavior and longer sessions after mission startup works.

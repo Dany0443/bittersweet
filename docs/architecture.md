@@ -74,15 +74,17 @@ card-name order for ties or unknown values. This chooses the host policy
 profile; it does not bind a Vulkan device or override Proton GPU selection.
 The synthetic probe tests include an integrated GPU beside a discrete GPU.
 
-The Windows runtime is still Windows-target code. On Linux it builds
-because its host surface is gated with `cfg(windows)`; the Linux host layer
-does not replace that surface yet. `Cargo.toml` lists the portable crates
-as `default-members` so `cargo build` and `cargo test` stay green on Linux
-without pretending the D3D12 runtime was ported.
+The runtime remains Windows-target code. Native Linux workspace builds
+exercise its portable paths through `cfg(windows)` gates. For execution,
+`cargo-xwin` builds the Windows runtime and Proton routes its D3D12 calls
+through vkd3d-proton. This path has locally rendered the account/player
+prompt; a native Vulkan backend is not implemented. `Cargo.toml` keeps
+portable crates as `default-members`.
 
-Cross-building the Windows runtime from Linux is possible with
-`cargo-xwin`, the approach used by upstream Scarlight and TuxBox; it is not
-part of the default workflow.
+Host compositor and depth helpers serialize their root signatures directly.
+They do not require Wine's HLSL compiler to embed root-signature attributes.
+Retail presentation records use a 72-byte stride, including all seven option
+words, while retaining per-plane rectangles and layer composition.
 
 
 ## Import resolution

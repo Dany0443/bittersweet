@@ -21,10 +21,11 @@ This is a work in progress. Be clear about what works today:
 - **Linux host tooling is usable now.** `setup.sh` prepares Proton-GE, a
   Wine prefix and the kernel tunables; `bittersweet doctor` and
   `bittersweet plan` inspect the machine and emit an environment file.
-- **The title does not run on Linux yet.** The Windows runtime still talks
-  to host D3D12 through Windows APIs. The gates make the code portable, not
-  functional under Proton. Do not expect a playable frame rate from this
-  tree; that is the next milestone.
+- **Experimental Proton startup is verified.** A Windows-target release
+  built on Linux starts under GE-Proton11-12 and renders the account/player
+  prompt through vkd3d-proton. The first mission is not verified. The local
+  startup attempt failed after compressed reads encountered zero-filled
+  source data; completing gameplay validation requires valid user files.
 
 The inherited runtime receives attributed shader and texture ports. Recent
 changes correct helper-lane reads, inactive-lane swizzles, DPP fetch-inactive
