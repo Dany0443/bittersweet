@@ -1151,6 +1151,59 @@ pub(crate) fn compile(
     Ok(bytes.to_vec())
 }
 
+// Wine's HLSL compiler can omit embedded root signatures.
+fn helper_root_signature(
+    device: &ID3D12Device,
+    params: &[D3D12_ROOT_PARAMETER1],
+    samplers: &[D3D12_STATIC_SAMPLER_DESC],
+) -> windows::core::Result<ID3D12RootSignature> {
+    use windows::Win32::Graphics::Direct3D::ID3DBlob;
+    let desc = D3D12_VERSIONED_ROOT_SIGNATURE_DESC {
+        Version: D3D_ROOT_SIGNATURE_VERSION_1_1,
+        Anonymous: D3D12_VERSIONED_ROOT_SIGNATURE_DESC_0 {
+            Desc_1_1: D3D12_ROOT_SIGNATURE_DESC1 {
+                NumParameters: params.len() as u32,
+                pParameters: params.as_ptr(),
+                NumStaticSamplers: samplers.len() as u32,
+                pStaticSamplers: samplers.as_ptr(),
+                Flags: D3D12_ROOT_SIGNATURE_FLAG_NONE,
+            },
+        },
+    };
+    let mut blob: Option<ID3DBlob> = None;
+    let mut errors: Option<ID3DBlob> = None;
+    // SAFETY: the description borrows live arrays and the blob owns its bytes.
+    unsafe {
+        D3D12SerializeVersionedRootSignature(&desc, &mut blob, Some(&mut errors))?;
+        let blob = blob.ok_or_else(windows::core::Error::empty)?;
+        let bytes = std::slice::from_raw_parts(blob.GetBufferPointer().cast(), blob.GetBufferSize());
+        device.CreateRootSignature(0, bytes)
+    }
+}
+
+fn helper_srv_table(range: &D3D12_DESCRIPTOR_RANGE1) -> D3D12_ROOT_PARAMETER1 {
+    D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE1 {
+                NumDescriptorRanges: 1,
+                pDescriptorRanges: range,
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_PIXEL,
+    }
+}
+
+fn helper_srv_range() -> D3D12_DESCRIPTOR_RANGE1 {
+    D3D12_DESCRIPTOR_RANGE1 {
+        RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+        NumDescriptors: 1,
+        Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE
+            | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE,
+        ..Default::default()
+    }
+}
+
 impl PlanePass {
     /// The root signature and pipeline for a twin of 16-bit steps (`steps`)
     /// or of floats and the depth format `format`.
@@ -1196,10 +1249,10 @@ impl PlanePass {
             pShaderBytecode: bytes.as_ptr().cast(),
             BytecodeLength: bytes.len(),
         };
-        // SAFETY: the root signature is inside the pixel shader; the
-        // description points at live data and never releases its pointer.
+        let range = helper_srv_range();
+        let root = helper_root_signature(device, &[helper_srv_table(&range)], &[])?;
+        // SAFETY: the description borrows live data and its root pointer is not released.
         unsafe {
-            let root: ID3D12RootSignature = device.CreateRootSignature(0, &ps[..])?;
             let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&root),
                 VS: code(&vs[..]),
@@ -6078,10 +6131,32 @@ fn make_layer(blended: bool, format: DXGI_FORMAT) -> windows::core::Result<Plane
     };
     let mut formats = [DXGI_FORMAT_UNKNOWN; 8];
     formats[0] = format;
-    // SAFETY: the root signature is inside the pixel shader; the
-    // description points at live data and never releases its pointer.
+    let range = helper_srv_range();
+    let constants = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Constants: D3D12_ROOT_CONSTANTS {
+                Num32BitValues: 4,
+                ..Default::default()
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let sampler = D3D12_STATIC_SAMPLER_DESC {
+        Filter: D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        AddressU: D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        AddressV: D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        AddressW: D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        MaxAnisotropy: 16,
+        ComparisonFunc: D3D12_COMPARISON_FUNC_LESS_EQUAL,
+        BorderColor: D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
+        MaxLOD: f32::MAX,
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+        ..Default::default()
+    };
+    let root = helper_root_signature(device, &[constants, helper_srv_table(&range)], &[sampler])?;
+    // SAFETY: the description borrows live data and its root pointer is not released.
     unsafe {
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, &ps[..])?;
         let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
             pRootSignature: std::mem::transmute_copy(&root),
             VS: code(&vs[..]),
@@ -6226,6 +6301,18 @@ fn record_layers(
 #[cfg(test)]
 mod layer_tests {
     use super::{fractions, texels};
+
+    #[test]
+    fn present_layer_pipelines_have_explicit_root_signatures() {
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
+        for blended in [false, true] {
+            super::make_layer(blended, DXGI_FORMAT_R8G8B8A8_UNORM).expect("present layer pipeline");
+        }
+        use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_D32_FLOAT};
+        for (steps, format) in [(false, DXGI_FORMAT_D32_FLOAT), (true, DXGI_FORMAT_D16_UNORM)] {
+            super::PlanePass::make(steps, format).expect("depth plane pipeline");
+        }
+    }
 
     #[test]
     fn rectangles() {

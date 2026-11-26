@@ -152,3 +152,12 @@ Retail presentation-plane stride follows `cool_fox`'s `RetailPlane` in
 retains this tree's rectangle and layer composition handling and adds the
 six missing option words. Source file SHA-256:
 `b1bd87c602264b182ba5edd33a3dc9840ec86a0e71329355fb8be3b3e24d9713`.
+
+## Wine helper pipeline adaptation
+
+Explicit helper root-signature serialization follows
+`fxceless/victory-fork` PR #1011, commit
+`d9e68ebb9a58f2abf35def0cf2b5a3ab714068c5` (GPL-3.0-or-later).
+This adaptation supplies the compositor's static sampler and SRV table and
+the depth helpers' SRV table independently of embedded HLSL attributes.
+The indirect-command shader rewrite from that PR is not included here.
