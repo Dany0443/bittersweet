@@ -103,6 +103,11 @@ repository.
   affect channel precision and endpoint order only in modes 4 and 5. Added a
   regression covering reserved bits in the other modes and actual channel
   swaps in modes 4 and 5. GPL-3.0-or-later.
+- **fxceless/victory-fork**, commit `e4245f3c1b0490250d9cf0946a2113000be98687`,
+  adapting upstream VIctory #3198: retain textures that fail host allocation
+  with `E_OUTOFMEMORY` as retryable and ask again on a later use after a
+  one-second delay. Other allocation failures remain refused. Added a portable
+  classification test. GPL-3.0-or-later.
 
 ## Reference only, no code copied
 

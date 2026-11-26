@@ -1163,10 +1163,30 @@ struct Hosted {
     used: std::sync::atomic::AtomicU64,
     /// The host refused to make it: not tried again.
     refused: std::sync::atomic::AtomicBool,
+    /// The card had no room for it: try again after a short delay.
+    no_room: std::sync::atomic::AtomicU64,
     /// Its host copy was let go as idle once.
     gone: std::sync::atomic::AtomicBool,
     /// A texture of [`PLACED_TEXTURES`].
     placed: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextureCreationFailure {
+    /// The description cannot be created on this host; do not retry it.
+    Refused,
+    /// The host is temporarily out of memory; a later use may succeed.
+    NoRoom,
+}
+
+#[cfg(any(windows, test))]
+fn texture_creation_failure(code: HRESULT) -> TextureCreationFailure {
+    if code == E_OUTOFMEMORY {
+        TextureCreationFailure::NoRoom
+    } else {
+        TextureCreationFailure::Refused
+    }
 }
 
 /// Counts for the memory line: host copies of textures the title fills
@@ -1310,15 +1330,27 @@ fn hosted(this: This, make: bool) -> Option<Made> {
         if !make || r.host.refused.load(Relaxed) {
             return None;
         }
+        let no_room = r.host.no_room.load(Relaxed);
+        if no_room != 0 && !crate::host::long_ago(no_room, 1000, 0) {
+            return None;
+        }
         let clear = r
             .host
             .clear
             .as_ref()
             .map_or(std::ptr::null(), |c| std::ptr::from_ref(c).cast::<c_void>());
-        let Some(texture) = host_texture(&r.desc, r.host.state, clear, r.data() as usize) else {
-            r.host.refused.store(true, Relaxed);
-            return None;
+        let texture = match host_texture(&r.desc, r.host.state, clear, r.data() as usize) {
+            Ok(texture) => texture,
+            Err(TextureCreationFailure::Refused) => {
+                r.host.refused.store(true, Relaxed);
+                return None;
+            }
+            Err(TextureCreationFailure::NoRoom) => {
+                r.host.no_room.store(crate::host::moment().max(1), Relaxed);
+                return None;
+            }
         };
+        r.host.no_room.store(0, Relaxed);
         let twin = twin_texture(&r.desc, &texture);
         // One line per depth texture with unordered access: its address is
         // the one target dumps and the captured frame's list of commands
@@ -1661,14 +1693,14 @@ fn host_texture(
     state: u32,
     clear: *const c_void,
     title_address: usize,
-) -> Option<windows::Win32::Graphics::Direct3D12::ID3D12Resource> {
+) -> Result<windows::Win32::Graphics::Direct3D12::ID3D12Resource, TextureCreationFailure> {
     use windows::Win32::Graphics::Direct3D12::*;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
     const PC_FLAGS: u32 = 0xf; // render target, depth, UAV, no shader access
     if desc.dimension == BUFFER {
-        return None;
+        return Err(TextureCreationFailure::Refused);
     }
-    let host = crate::host::host()?;
+    let host = crate::host::host().ok_or(TextureCreationFailure::NoRoom)?;
     let mut d = *desc;
     d.layout = 0;
     d.alignment = 0;
@@ -1772,7 +1804,8 @@ fn host_texture(
         static WRITABLE_REJECTED: AtomicBool = AtomicBool::new(false);
         if !use_fallback || !WRITABLE_REJECTED.load(Relaxed) {
             match allocate(&d, clear_value.as_ref()) {
-                Ok(texture) => return texture,
+                Ok(Some(texture)) => return Ok(texture),
+                Ok(None) => return Err(TextureCreationFailure::Refused),
                 Err(e) => {
                     static REPORTED: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
                     let code = e.code().0;
@@ -1781,28 +1814,35 @@ fn host_texture(
                         reported.push(code);
                         tracing::warn!(hresult = %format_args!("{code:#010x}"), desc = ?d, title_address, "no host RGB9E5 texture with title flags");
                     }
+                    let failure = texture_creation_failure(code);
+                    if failure == TextureCreationFailure::NoRoom {
+                        return Err(failure);
+                    }
                 }
             }
             if !use_fallback {
-                return None;
+                return Err(TextureCreationFailure::Refused);
             }
             WRITABLE_REJECTED.store(true, Relaxed);
         }
         d.flags = 0;
         match allocate(&d, None) {
-            Ok(texture) => texture,
+            Ok(Some(texture)) => Ok(texture),
+            Ok(None) => Err(TextureCreationFailure::Refused),
             Err(e) => {
                 static FAILED: std::sync::Once = std::sync::Once::new();
                 FAILED.call_once(|| tracing::warn!(hresult = ?e.code(), desc = ?d, title_address, "no copyable host RGB9E5 texture"));
-                None
+                Err(texture_creation_failure(e.code().0))
             }
         }
     } else {
         match allocate(&d, clear_value.as_ref()) {
-            Ok(texture) => texture,
+            Ok(Some(texture)) => Ok(texture),
+            Ok(None) => Err(TextureCreationFailure::Refused),
             Err(e) => {
+                let failure = texture_creation_failure(e.code().0);
                 tracing::warn!(error = %e, desc = ?d, "no host texture");
-                None
+                Err(failure)
             }
         }
     }
@@ -1877,6 +1917,7 @@ fn hand_out_resource(
             clear: (!clear.is_null()).then(|| unsafe { clear.cast::<[u32; 5]>().read_unaligned() }),
             used: std::sync::atomic::AtomicU64::new(0),
             refused: std::sync::atomic::AtomicBool::new(false),
+            no_room: std::sync::atomic::AtomicU64::new(0),
             gone: std::sync::atomic::AtomicBool::new(false),
             placed: std::sync::atomic::AtomicBool::new(false),
         },
@@ -2383,6 +2424,18 @@ static RESOURCE_FUNCTIONS: Table<32> = {
 mod tests {
     use super::*;
     use crate::object::slot;
+
+    #[test]
+    fn only_out_of_memory_texture_failures_are_retried() {
+        assert_eq!(
+            texture_creation_failure(E_OUTOFMEMORY),
+            TextureCreationFailure::NoRoom
+        );
+        assert_eq!(
+            texture_creation_failure(E_INVALIDARG),
+            TextureCreationFailure::Refused
+        );
+    }
 
     type Release = extern "system" fn(This) -> u32;
     type Map = extern "system" fn(This, u32, *const c_void, *mut *mut u8) -> HRESULT;
