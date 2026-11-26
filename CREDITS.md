@@ -71,6 +71,15 @@ repository.
   them look like an additive zero, so a wave sum could be folded as if the
   step were an identity. A focused wave32 test covers the zero identity and
   all nine inline constants.
+- **codec-d/cool_fox**, snapshot `cool_fox-main.zip` (SHA-256
+  `79f5bfe598730ddabfc01a1bc02a2fd5a70f80eb2642a6982321c232242838de`, no
+  Git history in the snapshot): include the per-instruction
+  `lanes.guards[b][i]` in `resource::Tracer::descriptor()` and `live()` when
+  pruning dead lane edges at a join. A join access guarded by EXEC could
+  otherwise be traced through an arm the guarded lanes never ran, losing a
+  descriptor that only the live arm builds. The regression test
+  `a_guarded_access_excludes_dead_lane_edges_at_a_join` is the upstream one.
+  GPL-3.0-or-later.
 - **Belobug/VIctory-Belobug-AMD PR #83**, head
   `803b19b710a6731cf84d923728d8aa43b6c4f55f` (dutch2005), from
   **Marvisak/VIctory #2406** (makmatvey): test raw VCC independently of EXEC
