@@ -727,6 +727,51 @@ mod tests {
     use super::{BUFFER_READ, BUFFER_WRITE, BufferStates};
 
     #[test]
+    fn card_compare_detects_changes_and_updates_hashes() {
+        let host = super::host().expect("host GPU");
+        let work = host.make_card_work().expect("card comparison pipeline");
+        const PIECE: usize = 64 << 10;
+        let (source, data) = host.shared_buffer((3 * PIECE) as u64).expect("source");
+        let (hashes, _) = host.shared_buffer(48).expect("hashes");
+        let content: Vec<u8> = (0..3 * PIECE).map(|i| (i * 31 + i / 251) as u8).collect();
+        // SAFETY: the mapped source holds the synthetic content.
+        unsafe { std::ptr::copy_nonoverlapping(content.as_ptr(), data, content.len()) };
+        let run = |mode| {
+            let list = host.new_list().expect("command list");
+            // SAFETY: live mapped buffers and matching root parameters; execution waits.
+            unsafe {
+                let results = work.differs.1 as *mut u32;
+                std::ptr::write_bytes(results, 0x77, 5);
+                list.list.SetComputeRootSignature(&work.root);
+                list.list.SetPipelineState(&work.pso);
+                list.list.SetComputeRootShaderResourceView(1, source.GetGPUVirtualAddress());
+                list.list.SetComputeRootUnorderedAccessView(2, hashes.GetGPUVirtualAddress());
+                list.list.SetComputeRootUnorderedAccessView(3, work.differs.0.GetGPUVirtualAddress());
+                super::dispatch_card_compare(&list.list, 0, 0, (3 * PIECE) as u32, 3, 4, mode);
+                list.close();
+                host.execute(&[&list]);
+                std::slice::from_raw_parts(results, 5).to_vec()
+            }
+        };
+        let sentinel = 0x77777777;
+        assert_eq!(run(0), [sentinel; 5]);
+        assert_eq!(run(1), [sentinel, 0, 0, 0, sentinel]);
+        for at in [0, PIECE + 1234, 3 * PIECE - 1] {
+            let mut expected = [sentinel, 0, 0, 0, sentinel];
+            expected[1 + at / PIECE] = 1;
+            // SAFETY: each mutation is inside the mapped source.
+            unsafe { data.add(at).write(content[at] ^ 0x40) };
+            assert_eq!(run(1), expected);
+            assert_eq!(run(1), expected);
+            assert_eq!(run(2), expected);
+            assert_eq!(run(2), [sentinel, 0, 0, 0, sentinel]);
+            // SAFETY: restore the same mapped byte.
+            unsafe { data.add(at).write(content[at]) };
+            assert_eq!(run(2), expected);
+        }
+    }
+
+    #[test]
     fn buffer_states_transition_between_writes_and_reads() {
         let mut s = BufferStates::default();
         // First uses: the prelude's.
@@ -1738,8 +1783,8 @@ cbuffer Span : register(b0) {
 ByteAddressBuffer now : register(t0);
 // 16 bytes per piece of the copy: the hash of its bytes when they were
 // last sent up (or hashed whole, the first time).
-RWByteAddressBuffer hashes : register(u0);
-RWByteAddressBuffer differs : register(u1);
+RWStructuredBuffer<uint4> hashes : register(u0);
+RWStructuredBuffer<uint> differs : register(u1);
 groupshared uint4 shared_h[64];
 [RootSignature(RS)]
 [numthreads(64, 1, 1)]
@@ -1782,12 +1827,12 @@ void main(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID) {
     if (lane == 0u) {
         uint4 final_h = shared_h[0];
         if (compare != 0u) {
-            differs.Store(out_at + idx * 4u, any(final_h != hashes.Load4(piece * 16u)) ? 1u : 0u);
+            differs[out_at / 4u + idx] = any(final_h != hashes[piece]) ? 1u : 0u;
             // With the copy-back on its own thread: the next compare of the
             // piece finds what is written from here on.
-            if (compare == 2u) hashes.Store4(piece * 16u, final_h);
+            if (compare == 2u) hashes[piece] = final_h;
         } else {
-            hashes.Store4(piece * 16u, final_h);
+            hashes[piece] = final_h;
         }
     }
 }
@@ -3271,11 +3316,41 @@ impl Host {
         const RESULTS: u64 = 1 << 20;
         let (differs, data) = self.shared_buffer(RESULTS).ok_or_else(windows::core::Error::empty)?;
         name(&differs, || "card compare results".into());
-        // SAFETY: the blob's own bytes; the root signature is inside the
-        // shader.
+        let constants = D3D12_ROOT_PARAMETER1 {
+            ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                Constants: D3D12_ROOT_CONSTANTS {
+                    ShaderRegister: 0,
+                    RegisterSpace: 0,
+                    Num32BitValues: 6,
+                },
+            },
+            ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+        };
+        let view = |kind, register| D3D12_ROOT_PARAMETER1 {
+            ParameterType: kind,
+            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                    ShaderRegister: register,
+                    RegisterSpace: 0,
+                    Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                },
+            },
+            ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+        };
+        let root = helper_root_signature(
+            &self.device,
+            &[
+                constants,
+                view(D3D12_ROOT_PARAMETER_TYPE_SRV, 0),
+                view(D3D12_ROOT_PARAMETER_TYPE_UAV, 0),
+                view(D3D12_ROOT_PARAMETER_TYPE_UAV, 1),
+            ],
+            &[],
+        )?;
+        // SAFETY: the shader blob and matching explicit root signature are live.
         unsafe {
             let bytes = std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-            let root: ID3D12RootSignature = self.device.CreateRootSignature(0, bytes)?;
             let pso: ID3D12PipelineState = self.device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&root),
                 CS: D3D12_SHADER_BYTECODE {

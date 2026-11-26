@@ -83,6 +83,8 @@ portable crates as `default-members`.
 
 Host compositor and depth helpers serialize their root signatures directly.
 They do not require Wine's HLSL compiler to embed root-signature attributes.
+The card-memory comparison helper also uses structured UAV accesses so
+Wine can compile its existing hash and change-detection algorithm.
 Retail presentation records use a 72-byte stride, including all seven option
 words, while retaining per-plane rectangles and layer composition.
 

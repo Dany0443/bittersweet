@@ -166,6 +166,12 @@ its existing per-record work budget and split-dispatch behavior. Synthetic
 GPU readback under Proton verifies record preservation, split output and
 budget accounting.
 
+The card-memory comparison helper applies the same structured-UAV and
+explicit-root-signature technique to Wine's unsupported raw UAV `Load4`
+and `Store4` calls. Its existing hash algorithm and comparison modes are
+preserved. Synthetic hardware readback under GE-Proton11-14 verifies
+changed-piece detection, hash updates and result-offset boundaries.
+
 DirectStorage partial batches now wait for the title's explicit submit,
 following `codec-d/cool_fox` from the source archive identified above.
 A full queue still submits when no queued or running reads can make room;

@@ -42,6 +42,9 @@ memory can be prepared before reads begin. `VICTORY_DSTORAGE_HALF=1` enables
 the earlier submission behavior for diagnostic comparisons.
 `VICTORY_PIPELINE_WORKERS=1` limits concurrent pipeline compilation for
 memory-constrained runs. Unset, the existing worker-count default applies.
+The GPU memory-comparison helper compiles under Wine and passes synthetic
+hardware readback tests under GE-Proton11-14. Mission execution remains
+unverified.
 
 ## Layout
 
