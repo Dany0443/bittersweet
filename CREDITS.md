@@ -208,3 +208,11 @@ parser fixtures. Runtime and offline translation select ACCC when a DXIL
 part is absent. Tests cover resource metadata, wave sizes, malformed
 records and complete synthetic container translation. This establishes
 container support; remaining instruction gaps prevent a complete upscale.
+
+Loaded buffer descriptors converted to byte addressing follow upstream
+commit `0b35b7fe7d728c9a9c205cb3719a0f11744321ce`. Tracking recognizes the
+complete stride-clearing, byte-count and bounds conversion for untyped
+accesses. Other descriptor changes remain rejected. The synthetic
+positive and negative test is adapted from the same upstream behavior.
+With container support, seven of 20 captured compute programs create host
+pipelines locally; the full console upscaler remains incomplete.
