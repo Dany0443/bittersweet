@@ -771,8 +771,12 @@ fn signature(part: &[u8]) -> Result<Vec<container::SigElement>, ShaderError> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::bitcode::Attr;
     use super::lower::LOOP_LIMIT;
     use super::parse_loop_limit;
+    #[cfg(windows)]
+    use super::shader::Shader;
 
     #[test]
     fn the_clean_up_switch_parses_or_runs_every_pass() {
@@ -1365,7 +1369,7 @@ mod tests {
         let st = crate::structure::structure(&p).unwrap();
         let res = crate::resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = crate::io::raise(&p, &native).unwrap();
-        let _out = super::emit(&c, &native, &p, &st, &io, &res).unwrap();
+        let out = super::emit(&c, &native, &p, &st, &io, &res).unwrap();
         #[cfg(windows)]
         if let Ok(mut v) = super::validator::Validator::load(
             super::validator::Validator::default_path().as_deref(),

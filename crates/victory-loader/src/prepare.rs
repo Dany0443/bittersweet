@@ -176,6 +176,9 @@ fn write(bytes: &mut [u8], at: usize, v: &[u8]) -> Result<(), PrepareError> {
 #[cfg(test)]
 mod tests {
     #[cfg(windows)]
+    use super::*;
+
+    #[cfg(windows)]
     #[test]
     fn patches_own_test_binary() {
         use super::*;
