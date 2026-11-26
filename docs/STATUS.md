@@ -29,8 +29,11 @@ synthetic hardware readback for changed pieces and hash updates. A title
 run used that path and reached world draw submission. A separate run
 selected the main presentation plane and read it back directly: the
 observed world frames remained nearly black, independently of overlay
-composition. Shader translation still rejects descriptor-only data reads
-and some compute programs. RAM and swap pressure also causes long frame
+composition. A subsequent conservative dimension-query port allows the
+three pixel shaders previously rejected for descriptor-only reads to
+translate and create host pipelines; the image remains nearly black.
+The user reports opening-cutscene audio with no visible scene. Some
+compute programs still fail translation. RAM and swap pressure causes long frame
 times on this 14 GiB host. Neither test verifies the first mission.
 
 ## What is missing
