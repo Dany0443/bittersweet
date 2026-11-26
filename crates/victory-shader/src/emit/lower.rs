@@ -8861,6 +8861,22 @@ impl<'a> Lower<'a> {
                     }
                 }
             }
+            "v_dot4c_i32_i8" => {
+                let Fields::Valu(v) = &inst.fields else { unreachable!() };
+                let (a, b) = (s(self, 0)?, s(self, 1)?);
+                let Some(Operand::Vector { reg, .. }) = v.dst else {
+                    return Err("an accumulator");
+                };
+                let acc = self.i32_of(inst.read(Reg::V(reg)).ok_or("an accumulator")?)?;
+                self.s.op(
+                    c,
+                    "dot4AddPacked.i32",
+                    Attr::ReadNone,
+                    self.s.t.i32,
+                    163,
+                    &[acc, a, b],
+                )
+            }
             "v_mul_u32_u24" | "v_mul_i32_i24" => {
                 let (a, b) = (s(self, 0)?, s(self, 1)?);
                 let (sh, op) = (

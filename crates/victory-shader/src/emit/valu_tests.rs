@@ -135,6 +135,26 @@ fn build_valu_cs(body: &[u32]) -> HostShader {
     build_cs(body, 1, 0)
 }
 
+#[test]
+fn packed_signed_byte_dot_accumulates_and_wraps() {
+    let shader = build_valu_cs(&[
+        vop1(1, 0, vgpr(3)),
+        (0x0d << 25) | (2 << 9) | u32::from(vgpr(1)),
+    ]);
+    let cases = [
+        [0x807fff01, 0xff0180fe, 0, 0],
+        [0x01010101, 0x01010101, u32::MAX - 1, 0],
+        [0x80808080, 0x80808080, 0x7fffffff, 0],
+        [0x7f7f7f7f, 0x81818181, 17, 0],
+    ];
+    run_cases(&shader, &cases, |backend, _, [a, b, acc, _], actual| {
+        let expected = a.to_le_bytes().into_iter().zip(b.to_le_bytes()).fold(acc, |sum, (a, b)| {
+            sum.wrapping_add(((a as i8 as i32) * (b as i8 as i32)) as u32)
+        });
+        assert_eq!(actual, expected, "{backend}");
+    });
+}
+
 /// [`build_valu_cs`] with `threads` threads in x (thread index in `v0`
 /// on entry, before `body`) and `lds_bytes` of LDS (a multiple of 512).
 fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
