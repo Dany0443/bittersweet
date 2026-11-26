@@ -37,3 +37,6 @@ These adaptations are GPL-3.0-or-later; original authors are credited in CREDITS
 
 DexNom/VIctory adaptations are GPL-3.0-or-later. Exact source commits
 and adaptation scope are recorded in CREDITS.md.
+
+Integer render-target blend handling is adapted from codec-d/cool_fox
+(GPL-3.0-or-later). Source archive provenance is recorded in CREDITS.md.

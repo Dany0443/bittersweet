@@ -135,3 +135,14 @@ All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 - Pixel quad reads and quad-local DPP8, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Use native quad reads for pixel and mesh quad permutations, specialize broadcasts/exchanges, and reject DPP8 selections that cross pixel quads. Use quad-local EXEC guards for helper activity.
 
 - Cube gradient mip selection, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Use DXIL base-2 Log directly and honor the instruction minimum LOD before SampleLevel. Add mip-capable synthetic cube views without changing the existing single-mip view constructor.
+
+## cool_fox adaptations
+
+Integer render-target blend normalization and its synthetic tests are adapted
+from the user-supplied `codec-d/cool_fox` source archive (GPL-3.0-or-later),
+`crates/victory-gpu/src/pipeline/host.rs`. Both graphics and mesh pipelines
+preserve color blending while disabling integer-target blending. The archive
+contains no Git commit identity; its SHA-256 is
+`79f5bfe598730ddabfc01a1bc02a2fd5a70f80eb2642a6982321c232242838de`.
+The source file SHA-256 is
+`e81023c24ffbf003b2ef80419310a71c87c11b36df1fa387c6b23b3ade7e78f5`.

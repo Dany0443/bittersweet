@@ -33,7 +33,9 @@ use parallel BLAKE3 with identical checksums. Synthetic tests run on Linux;
 these checks do not establish title compatibility or frame-time gains.
 DexNom ports add uniform static-sampler choices, restored wave64 masks,
 source-less/CMPX decoding fixes, pixel quad operations, cube-gradient mip
-selection and shader optimizer analysis reuse.
+selection and shader optimizer analysis reuse. Host graphics and mesh pipelines
+also disable blending on integer render targets, preserving color-target state.
+The blend-state regression tests pass under Proton-GE; GPU execution is unverified.
 
 ## Layout
 
