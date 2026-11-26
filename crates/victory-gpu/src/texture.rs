@@ -1013,20 +1013,21 @@ fn committed_by_query(at: *const u8, len: usize) -> bool {
 /// How many bytes of `[at, at + len)` are committed memory: all of a
 /// texture that is there, some of one streaming in (its smaller mips lie
 /// at the start of its memory, and their pages are mapped first), none of
-/// one not there. With neither the first nor the last page committed the
-/// answer is none without a look at the pages between (two queries for the
-/// slots whose texture is away, which are asked again and again).
+/// one not there. Streaming can also leave only interior mips committed;
+/// `VirtualQuery` skips the uncommitted runs in that case.
 pub(crate) fn mapped_bytes(at: *const u8, len: usize) -> u64 {
-    use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, VirtualQuery};
-    if len == 0 {
-        return 0;
-    }
     let start = at as usize;
     let end = start.saturating_add(len);
-    if !committed(at, 1) && !committed((end - 1) as *const u8, 1) {
+    if start == end {
         return 0;
     }
-    if !by_query() {
+    let query = by_query();
+    let first_readable = !query && committed(at, 1);
+    let ends_missing = !query && !first_readable && !committed((end - 1) as *const u8, 1);
+    if ends_missing && (end - 1) / 4096 - start / 4096 <= 1 {
+        return 0;
+    }
+    if !query && !ends_missing {
         static BY_PAGE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *BY_PAGE.get_or_init(|| std::env::var_os("VICTORY_MAPPED_BY_PAGE").is_some_and(|v| v == "1")) {
             // By page, without the walk: whole pages, cut to the range.
@@ -1053,17 +1054,26 @@ pub(crate) fn mapped_bytes(at: *const u8, len: usize) -> u64 {
         }
         return there;
     }
+    mapped_regions(start, end)
+}
+
+fn mapped_regions(start: usize, end: usize) -> u64 {
+    use windows_sys::Win32::System::Memory::{
+        MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, VirtualQuery,
+    };
     let (mut p, mut there) = (start, 0u64);
     while p < end {
         // SAFETY: plain data filled in by the query.
         let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
         // SAFETY: a valid out pointer of the right size.
         let n = unsafe { VirtualQuery(p as *const _, &mut info, size_of_val(&info)) };
-        let next = (info.BaseAddress as usize).saturating_add(info.RegionSize).min(end);
+        let next = (info.BaseAddress as usize)
+            .saturating_add(info.RegionSize)
+            .min(end);
         if n == 0 || next <= p {
             break;
         }
-        if info.State == MEM_COMMIT {
+        if info.State == MEM_COMMIT && info.Protect & (PAGE_NOACCESS | PAGE_GUARD) == 0 {
             there += (next - p) as u64;
         }
         p = next;
@@ -1193,6 +1203,27 @@ mod title_memory_tests {
                 assert!(bytes[0x5_0000..HEAD].iter().all(|&b| b == 0x5a));
                 assert!(bytes[HEAD..].iter().all(|&b| b == 0));
             });
+            assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
+        }
+    }
+
+    #[test]
+    fn mapped_bytes_counts_only_committed_interior_texture_pages() {
+        use windows_sys::Win32::System::Memory::*;
+        const BLOCK: usize = 64 << 10;
+        // SAFETY: this private reservation is ours throughout the test.
+        unsafe {
+            let base =
+                VirtualAlloc(std::ptr::null(), 5 * BLOCK, MEM_RESERVE, PAGE_NOACCESS).cast::<u8>();
+            assert!(!base.is_null());
+            let middle = base.add(2 * BLOCK);
+            assert_eq!(
+                VirtualAlloc(middle.cast(), BLOCK, MEM_COMMIT, PAGE_READWRITE),
+                middle.cast()
+            );
+            assert_eq!(super::mapped_bytes(base, 5 * BLOCK), BLOCK as u64);
+            assert_ne!(VirtualFree(middle.cast(), BLOCK, MEM_DECOMMIT), 0);
+            assert_eq!(super::mapped_bytes(base, 5 * BLOCK), 0);
             assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
         }
     }
