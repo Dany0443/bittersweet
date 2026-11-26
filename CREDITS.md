@@ -160,4 +160,8 @@ Explicit helper root-signature serialization follows
 `d9e68ebb9a58f2abf35def0cf2b5a3ab714068c5` (GPL-3.0-or-later).
 This adaptation supplies the compositor's static sampler and SRV table and
 the depth helpers' SRV table independently of embedded HLSL attributes.
-The indirect-command shader rewrite from that PR is not included here.
+The indirect clamp also follows that PR's Wine-compatible structured UAV
+accesses, atomic functions and explicit root signature. This tree keeps
+its existing per-record work budget and split-dispatch behavior. Synthetic
+GPU readback under Proton verifies record preservation, split output and
+budget accounting.

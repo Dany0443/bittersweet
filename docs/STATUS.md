@@ -68,7 +68,7 @@ changes and title execution remain unverified.
 | Item | Upstream | Status |
 |---|---|---|
 | Save the early list when there is no host library | victory-fork #259 | Not ported; Windows-only code, needs a Windows build to verify |
-| Root signature made beside Wine-compiled HLSL | victory-fork #1011 | Compositor and depth helpers ported and tested under Proton; indirect rewrite pending |
+| Root signature made beside Wine-compiled HLSL | victory-fork #1011 | Compositor, depth helpers and indirect clamp ported; synthetic Proton GPU tests pass |
 | Compile runtime HLSL with DXC when the system compiler refuses | victory-fork #20 | Not ported; Windows-only |
 | Depth twin's root signature when the compiler drops it | VIctory #1872 | Not ported; Windows-only |
 | Title memory copied, not in place, under Wine | Belobug #53 | Not ported; needs the Linux backend first |

@@ -4,9 +4,8 @@
 //! billion vertices or a dispatch past the host's limits runs until the
 //! host resets the display driver. So active records are copied and clamped
 //! on the GPU into a device-local scratch buffer, just before execution, by a
-//! compute shader of ours (HLSL compiled by the system's compiler; a 5.1
-//! shader with its root signature inside), leaving the title's argument and
-//! count buffers untouched.
+//! compute shader of ours, with its root signature serialized separately,
+//! leaving the title's argument and count buffers untouched.
 //!
 //! When a count buffer is given, threads at or past `min(max, count)` return
 //! immediately without charging the list's budget or reading uninitialized
@@ -28,7 +27,6 @@ use windows::core::s;
 use crate::host::{BUFFER_READ, HostList, host, transition};
 
 const SOURCE: &str = r#"
-#define RS "RootConstants(num32BitConstants=6, b0), SRV(t0), SRV(t1), UAV(u0), UAV(u1)"
 cbuffer Record : register(b0) {
     uint kind;
     uint stride;
@@ -43,15 +41,14 @@ cbuffer Record : register(b0) {
 };
 ByteAddressBuffer src_args : register(t0);
 ByteAddressBuffer count_buf : register(t1);
-RWByteAddressBuffer dst_args : register(u0);
+RWStructuredBuffer<uint> dst_args : register(u0);
 // The list's work so far (vertex instances, threads): past the budget,
 // records run empty.
-RWByteAddressBuffer budget : register(u1);
+RWStructuredBuffer<uint> budget : register(u1);
 static const uint BUDGET = 1u << 27;
 // Groups of one dispatch; more run empty.
 static const uint GROUPS = 1u << 20;
 static const uint SPLIT = 2;
-[RootSignature(RS)]
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
     uint eff_count = records;
@@ -62,7 +59,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     }
     if (id.x >= eff_count) return;
     uint src_at = args_offset + id.x * stride;
-    uint dst_at = id.x * stride;
+    uint dst_at = id.x * (stride / 4);
     uint cost;
     uint2 draw_counts = uint2(0, 0);
     uint3 groups = uint3(0, 0, 0);
@@ -102,8 +99,8 @@ void main(uint3 id : SV_DispatchThreadID) {
         // Diagnostics, in the budget buffer's next words: the largest
         // group count a mesh record asked for, and the groups asked in all.
         uint was;
-        budget.InterlockedMax(4, g.x, was);
-        budget.InterlockedAdd(8, min(g.x, 1u << 24), was);
+        InterlockedMax(budget[1], g.x, was);
+        InterlockedAdd(budget[2], min(g.x, 1u << 24), was);
         g = uint3(min(g.x, 65535u), min(g.y, 1u), min(g.z, 1u));
         cost = g.x * g.y * g.z * 128u;
         groups = g;
@@ -111,12 +108,11 @@ void main(uint3 id : SV_DispatchThreadID) {
     bool over = false;
     if (cost > 0) {
         uint before;
-        budget.InterlockedOr(0, 0, before);
-        [allow_uav_condition]
+        InterlockedOr(budget[0], 0, before);
         while (before < BUDGET) {
             uint next = (BUDGET - before <= cost) ? BUDGET : (before + cost);
             uint prev;
-            budget.InterlockedCompareExchange(0, before, next, prev);
+            InterlockedCompareExchange(budget[0], before, next, prev);
             if (prev == before) break;
             before = prev;
         }
@@ -126,9 +122,10 @@ void main(uint3 id : SV_DispatchThreadID) {
         if (over) {
             draw_counts = uint2(0, 0);
         }
-        dst_args.Store2(dst_at, draw_counts);
+        dst_args[dst_at] = draw_counts.x;
+        dst_args[dst_at + 1] = draw_counts.y;
         for (uint off = 8; off < stride; off += 4) {
-            dst_args.Store(dst_at + off, src_args.Load(src_at + off));
+            dst_args[dst_at + off / 4] = src_args.Load(src_at + off);
         }
     } else {
         if (over) {
@@ -138,13 +135,17 @@ void main(uint3 id : SV_DispatchThreadID) {
             for (uint part = 0; part < SPLIT; part++) {
                 uint before = part * 65535u;
                 uint x = groups.x > before ? min(groups.x - before, 65535u) : 0u;
-                dst_args.Store3(dst_at + part * 12u, uint3(x, groups.yz));
+                dst_args[dst_at + part * 3u] = x;
+                dst_args[dst_at + part * 3u + 1] = groups.y;
+                dst_args[dst_at + part * 3u + 2] = groups.z;
             }
             return;
         }
-        dst_args.Store3(dst_at, groups);
+        dst_args[dst_at] = groups.x;
+        dst_args[dst_at + 1] = groups.y;
+        dst_args[dst_at + 2] = groups.z;
         for (uint off = 12; off < stride; off += 4) {
-            dst_args.Store(dst_at + off, src_args.Load(src_at + off));
+            dst_args[dst_at + off / 4] = src_args.Load(src_at + off);
         }
     }
 }
@@ -176,6 +177,45 @@ fn clamp() -> Option<&'static Clamp> {
 fn make() -> windows::core::Result<Clamp> {
     let device = &host().ok_or_else(windows::core::Error::empty)?.device;
     make_for(device)
+}
+
+fn clamp_root_signature(device: &ID3D12Device) -> windows::core::Result<ID3D12RootSignature> {
+    let constants = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Constants: D3D12_ROOT_CONSTANTS {
+                Num32BitValues: 6,
+                ..Default::default()
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let view = |kind, register| D3D12_ROOT_PARAMETER1 {
+        ParameterType: kind,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                ShaderRegister: register,
+                RegisterSpace: 0,
+                Flags: if kind == D3D12_ROOT_PARAMETER_TYPE_UAV {
+                    D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE
+                } else {
+                    D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE
+                },
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    crate::host::helper_root_signature(
+        device,
+        &[
+            constants,
+            view(D3D12_ROOT_PARAMETER_TYPE_SRV, 0),
+            view(D3D12_ROOT_PARAMETER_TYPE_SRV, 1),
+            view(D3D12_ROOT_PARAMETER_TYPE_UAV, 0),
+            view(D3D12_ROOT_PARAMETER_TYPE_UAV, 1),
+        ],
+        &[],
+    )
 }
 
 fn make_for(device: &ID3D12Device) -> windows::core::Result<Clamp> {
@@ -211,11 +251,11 @@ fn make_for(device: &ID3D12Device) -> windows::core::Result<Clamp> {
         return Err(e);
     }
     let code = code.ok_or_else(windows::core::Error::empty)?;
-    // SAFETY: the blob's own bytes; the root signature is inside the shader.
+    let root = clamp_root_signature(device)?;
+    // SAFETY: the blob owns its bytes; the description borrows the live root.
     unsafe {
         let bytes =
             std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, bytes)?;
         let pso = device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: std::mem::transmute_copy(&root),
             CS: D3D12_SHADER_BYTECODE {
@@ -817,6 +857,73 @@ void main() {
             return; // no host GPU here
         }
         assert!(super::clamp().is_some());
+    }
+
+    #[test]
+    fn host_clamp_preserves_records_and_split_budget() {
+        let host = super::host().expect("host GPU");
+        let clamp = make_for(&host.device).expect("argument clamp");
+        for (input, stride, records, how, expected, cost) in [
+            ([2u32, 1, 1, 3, 1, 1], 12, 2, 0, [2u32, 1, 1, 3, 1, 1], 320u32),
+            ([2, 1, 1, 111, 222, 333], 24, 1, 0, [2, 1, 1, 111, 222, 333], 128),
+            (
+                [70000, 1, 1, 0, 0, 0],
+                12,
+                1,
+                IN_PARTS,
+                [65535, 1, 1, 4465, 1, 1],
+                4480000,
+            ),
+        ] {
+            let (source, source_data) = host.shared_buffer(24).expect("source buffer");
+            let (destination, destination_data) =
+                host.shared_buffer(24).expect("destination buffer");
+            let (budget, budget_data) = host.shared_buffer(12).expect("budget buffer");
+            let list = host.new_list().expect("command list");
+            // SAFETY: mapped buffers hold the declared arrays; the list is open.
+            unsafe {
+                std::ptr::copy_nonoverlapping(input.as_ptr(), source_data.cast(), 6);
+                std::ptr::write_bytes(destination_data, 0, 24);
+                std::ptr::write_bytes(budget_data, 0, 12);
+                list.list.ResourceBarrier(&[
+                    transition(
+                        &source,
+                        D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    ),
+                    transition(
+                        &budget,
+                        D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    ),
+                ]);
+                assert!(record_clamp_as(
+                    &clamp,
+                    &list.list,
+                    &destination,
+                    budget.GetGPUVirtualAddress(),
+                    (&source, 0),
+                    None,
+                    (2, stride, records),
+                    how,
+                ));
+                list.list.ResourceBarrier(&[uav_barrier()]);
+            }
+            list.close();
+            host.execute(&[&list]);
+            // SAFETY: execution finished and all three buffers remain mapped.
+            unsafe {
+                assert_eq!(
+                    std::slice::from_raw_parts(destination_data.cast::<u32>(), 6),
+                    expected
+                );
+                assert_eq!(
+                    std::slice::from_raw_parts(source_data.cast::<u32>(), 6),
+                    input
+                );
+                assert_eq!(budget_data.cast::<u32>().read(), cost);
+            }
+        }
     }
 
     #[test]

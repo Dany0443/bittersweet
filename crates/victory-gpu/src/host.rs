@@ -1152,7 +1152,7 @@ pub(crate) fn compile(
 }
 
 // Wine's HLSL compiler can omit embedded root signatures.
-fn helper_root_signature(
+pub(crate) fn helper_root_signature(
     device: &ID3D12Device,
     params: &[D3D12_ROOT_PARAMETER1],
     samplers: &[D3D12_STATIC_SAMPLER_DESC],
