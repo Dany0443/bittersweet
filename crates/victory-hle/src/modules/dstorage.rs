@@ -1071,34 +1071,12 @@ fn execute(request: &Request, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
 /// that ends short of `out` passes: the title's chunks fill it exactly, and
 /// nothing says that is required.
 fn inflate(source: &[u8], out: &mut [u8]) -> Result<usize, HRESULT> {
-    let zlib = inflate_with_header(source, out, true);
-    static RAW_FALLBACK: OnceLock<bool> = OnceLock::new();
-    let allow_raw = *RAW_FALLBACK
-        .get_or_init(|| std::env::var_os("VICTORY_DSTORAGE_RAW_DEFLATE").is_some_and(|v| v == "1"));
-    if zlib.is_ok() || !allow_raw || valid_zlib_header(source) {
-        return zlib;
-    }
-    match inflate_with_header(source, out, false) {
-        Ok(written) => {
-            tracing::warn!(
-                source_bytes = source.len(),
-                produced = written,
-                "dstorage: accepted raw DEFLATE for a zlib request (VICTORY_DSTORAGE_RAW_DEFLATE=1)"
-            );
-            Ok(written)
-        }
-        Err(_) => zlib,
-    }
-}
-
-/// Inflates either an RFC 1950 stream or a raw RFC 1951 DEFLATE stream.
-fn inflate_with_header(source: &[u8], out: &mut [u8], zlib_header: bool) -> Result<usize, HRESULT> {
     thread_local! {
         static INFLATE: std::cell::RefCell<zlib_rs::Inflate> =
             std::cell::RefCell::new(zlib_rs::Inflate::new(true, 15));
     }
     INFLATE.with_borrow_mut(|state| {
-        state.reset(zlib_header);
+        state.reset(true);
         // `Inflate::decompress` cannot distinguish a valid empty stream from
         // an insufficient buffer when `avail_out == 0`, so use a 1-byte scratch
         // destination and verify `written <= out_len` afterward.
@@ -1132,7 +1110,6 @@ fn inflate_with_header(source: &[u8], out: &mut [u8], zlib_header: bool) -> Resu
                 tracing::warn!(
                     ?other,
                     detail = state.error_message().unwrap_or("unknown"),
-                    zlib_header,
                     zlib_header_valid = valid_zlib_header(source),
                     source_bytes = source.len(),
                     destination_bytes = out_len,
@@ -1573,31 +1550,12 @@ mod tests {
         packed.to_vec()
     }
 
-    fn compress_raw_deflate(plain: &[u8]) -> Vec<u8> {
-        let mut config = zlib_rs::DeflateConfig::new(6);
-        config.window_bits = -15;
-        let mut buf = vec![0u8; zlib_rs::compress_bound(plain.len())];
-        let (packed, rc) = zlib_rs::compress_slice(&mut buf, plain, config);
-        assert_eq!(rc, zlib_rs::ReturnCode::Ok);
-        packed.to_vec()
-    }
-
     #[test]
     fn zlib_header_check_rejects_short_or_invalid_headers() {
         assert!(valid_zlib_header(&compress_zlib(b"test")));
         assert!(!valid_zlib_header(&[]));
         assert!(!valid_zlib_header(&[0x78]));
         assert!(!valid_zlib_header(&[0, 0]));
-    }
-
-    #[test]
-    fn raw_deflate_streams_inflate_without_a_zlib_wrapper() {
-        let plain = pattern(65_537);
-        let packed = compress_raw_deflate(&plain);
-        let mut out = vec![0; plain.len()];
-        assert_eq!(inflate_with_header(&packed, &mut out, false), Ok(plain.len()));
-        assert_eq!(out, plain);
-        assert!(!valid_zlib_header(&packed));
     }
 
     #[test]
