@@ -45,3 +45,4 @@ Retail presentation-plane layout also follows the same cool_fox archive.
 Helper pipeline root-signature serialization follows fxceless/victory-fork
 PR #1011 (GPL-3.0-or-later). See CREDITS.md for source and adaptation scope.
 DirectStorage submission ordering also follows the same cool_fox archive.
+Pipeline worker-count overrides also follow the same cool_fox archive.

@@ -165,3 +165,8 @@ DirectStorage partial batches remain queued until the title submits them,
 after preparing destination memory. A full queue forces submission only
 when no previously submitted reads can make room. The diagnostic override
 `VICTORY_DSTORAGE_HALF=1` restores early submission for comparison.
+
+Pipeline compilation retains its existing CPU-based worker default and
+256 MiB worker stacks. `VICTORY_PIPELINE_WORKERS` accepts an explicit count
+bounded to 1 through 64, allowing a single compiler during memory-constrained
+validation without changing shader output or compilation requirements.

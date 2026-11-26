@@ -40,6 +40,8 @@ The blend-state regression tests pass under Proton-GE; GPU execution is unverifi
 DirectStorage partial batches wait for explicit submission so destination
 memory can be prepared before reads begin. `VICTORY_DSTORAGE_HALF=1` enables
 the earlier submission behavior for diagnostic comparisons.
+`VICTORY_PIPELINE_WORKERS=1` limits concurrent pipeline compilation for
+memory-constrained runs. Unset, the existing worker-count default applies.
 
 ## Layout
 

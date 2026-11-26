@@ -173,3 +173,10 @@ A full queue still submits when no queued or running reads can make room;
 Synthetic tests cover both partial-batch ordering and full-queue progress.
 Source file `crates/victory-hle/src/modules/dstorage.rs` SHA-256:
 `ba5ca8e567b72c74f4c0aef5941541188deed762fd650eb67b92b763f3f09222`.
+
+The bounded `VICTORY_PIPELINE_WORKERS` override follows `cool_fox`'s
+`crates/victory-gpu/src/pipeline/make.rs`, from the same archive. This
+adaptation preserves bittersweet's default of half the logical processors,
+bounded to 2 through 8 workers, and its larger Proton pipeline stack.
+Source file SHA-256:
+`e329581b29607a54a8e5a076b323ab31382e88ebcbe67ce85894c8cc2d93b3ca`.

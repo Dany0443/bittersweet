@@ -351,12 +351,22 @@ fn next() -> Arc<Pending> {
     }
 }
 
-/// Starts the workers (half the logical processors, 2 to 8) on first use.
+fn worker_count(asked: Option<usize>, processors: usize) -> usize {
+    asked.map_or_else(|| (processors / 2).clamp(2, 8), |n| n.clamp(1, 64))
+}
+
+/// Starts the configured pipeline workers on first use.
 fn workers() -> bool {
     static RUNNING: OnceLock<bool> = OnceLock::new();
     *RUNNING.get_or_init(|| {
         let mut running = false;
-        let workers = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 8));
+        let workers = worker_count(
+            std::env::var("VICTORY_PIPELINE_WORKERS")
+                .ok()
+                .and_then(|value| value.trim().parse().ok()),
+            std::thread::available_parallelism().map_or(2, |n| n.get()),
+        );
+        tracing::info!(workers, "pipeline workers");
         for i in 0..workers {
             let spawned = std::thread::Builder::new()
                 .name(format!("victory-pipelines-{i}"))
@@ -408,6 +418,18 @@ fn drained() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_count_accepts_bounded_overrides() {
+        assert_eq!(worker_count(None, 1), 2);
+        assert_eq!(worker_count(None, 12), 6);
+        assert_eq!(worker_count(None, usize::MAX), 8);
+        assert_eq!(worker_count(Some(1), 12), 1);
+        assert_eq!(worker_count(Some(0), 12), 1);
+        assert_eq!(worker_count(Some(16), 12), 16);
+        assert_eq!(worker_count(Some(usize::MAX), 12), 64);
+    }
+
 
     /// A first use queues the pipeline and, within the budget, gets the
     /// worker's answer (here: no host pipeline for no shaders).
