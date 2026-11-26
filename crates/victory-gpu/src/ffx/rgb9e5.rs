@@ -47,6 +47,14 @@ struct Packer {
     pipeline: ID3D12PipelineState,
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rgb9e5_pipeline_builds() {
+        super::make_packer().expect("RGB9E5 pipeline");
+    }
+}
+
 // SAFETY: the immutable D3D12 root signature and pipeline are free-threaded.
 unsafe impl Send for Packer {}
 // SAFETY: as above.
@@ -96,11 +104,47 @@ fn make_packer() -> Result<Packer> {
         return Err(error);
     }
     let code = code.ok_or_else(Error::empty)?;
-    // SAFETY: the compiler blob contains the shader and its root signature.
+    let ranges = [D3D12_DESCRIPTOR_RANGE1 {
+        RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+        NumDescriptors: 1,
+        Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE,
+        ..Default::default()
+    }];
+    let constants = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Constants: D3D12_ROOT_CONSTANTS {
+                Num32BitValues: 3,
+                ..Default::default()
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let table = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE1 {
+                NumDescriptorRanges: ranges.len() as u32,
+                pDescriptorRanges: ranges.as_ptr(),
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let uav = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_UAV,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                ..Default::default()
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let root = crate::host::helper_root_signature(device, &[table, uav, constants], &[])?;
+    // SAFETY: the compiler blob and matching root signature are live.
     unsafe {
         let bytes =
-            std::slice::from_raw_parts(code.GetBufferPointer().cast(), code.GetBufferSize());
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, bytes)?;
+            std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
         let pipeline = device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: std::mem::transmute_copy(&root),
             CS: D3D12_SHADER_BYTECODE {

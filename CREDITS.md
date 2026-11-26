@@ -216,3 +216,9 @@ accesses. Other descriptor changes remain rejected. The synthetic
 positive and negative test is adapted from the same upstream behavior.
 With container support, seven of 20 captured compute programs create host
 pipelines locally; the full console upscaler remains incomplete.
+
+The existing simple scaler and RGB9E5 output helper use explicit root
+signatures for Wine, following the helper-pipeline technique above.
+The scaler's root-signature attribute uses one string literal because
+Wine rejects adjacent literals there. Focused Proton tests reproduce
+both pipeline-creation failures before the changes and pass afterward.
