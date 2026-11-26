@@ -1075,20 +1075,40 @@ fn inflate(source: &[u8], out: &mut [u8]) -> Result<usize, HRESULT> {
     static RAW_FALLBACK: OnceLock<bool> = OnceLock::new();
     let allow_raw = *RAW_FALLBACK
         .get_or_init(|| std::env::var_os("VICTORY_DSTORAGE_RAW_DEFLATE").is_some_and(|v| v == "1"));
-    if zlib.is_ok() || !allow_raw || valid_zlib_header(source) {
+    if zlib.is_ok() || !allow_raw {
         return zlib;
     }
-    match inflate_with_header(source, out, false) {
-        Ok(written) => {
+
+    static PREFIX_SCAN: OnceLock<usize> = OnceLock::new();
+    let prefix_scan = *PREFIX_SCAN.get_or_init(|| {
+        std::env::var("VICTORY_DSTORAGE_RAW_DEFLATE_PREFIX_SCAN")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0)
+            .min(16)
+    });
+    if valid_zlib_header(source) {
+        return zlib;
+    }
+    for skip in 0..=prefix_scan {
+        let Some(candidate) = source.get(skip..) else {
+            break;
+        };
+        let with_header = valid_zlib_header(candidate);
+        if let Ok(written) = inflate_with_header(candidate, out, with_header)
+            && written == out.len()
+        {
             tracing::warn!(
+                skipped = skip,
+                zlib_header = with_header,
                 source_bytes = source.len(),
                 produced = written,
-                "dstorage: accepted raw DEFLATE for a zlib request (VICTORY_DSTORAGE_RAW_DEFLATE=1)"
+                "dstorage: accepted a fallback compressed stream (VICTORY_DSTORAGE_RAW_DEFLATE=1)"
             );
-            Ok(written)
+            return Ok(written);
         }
-        Err(_) => zlib,
     }
+    zlib
 }
 
 /// Inflates either an RFC 1950 stream or a raw RFC 1951 DEFLATE stream.
@@ -1598,6 +1618,17 @@ mod tests {
         assert_eq!(inflate_with_header(&packed, &mut out, false), Ok(plain.len()));
         assert_eq!(out, plain);
         assert!(!valid_zlib_header(&packed));
+    }
+
+    #[test]
+    fn raw_deflate_after_a_prefix_decodes() {
+        let plain = pattern(4096);
+        let packed = compress_raw_deflate(&plain);
+        let mut source = vec![0xa5, 0x5a];
+        source.extend_from_slice(&packed);
+        let mut out = vec![0; plain.len()];
+        assert_eq!(inflate_with_header(&source[2..], &mut out, false), Ok(plain.len()));
+        assert_eq!(out, plain);
     }
 
     #[test]
