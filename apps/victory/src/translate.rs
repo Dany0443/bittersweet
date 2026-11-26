@@ -341,10 +341,14 @@ fn translate(
     let example = || format!("{}{} #{hash}", path.display(), source.label());
     t.containers += 1;
     let Ok(container) = Container::parse(&bytes) else {
-        return t.fail("no DXIL part (SM5 or older)".into(), example);
+        return t.fail("not a DXBC container".into(), example);
     };
-    let Some(dxil) = container.part(FourCC::DXIL).map(|p| p.data) else {
-        return t.fail("no DXIL part (SM5 or older)".into(), example);
+    let Some(dxil) = container
+        .part(FourCC::DXIL)
+        .or_else(|| container.part(FourCC::ACCC))
+        .map(|p| p.data)
+    else {
+        return t.fail("no DXIL or ACCC part".into(), example);
     };
     // `~`: the hash of the code alone; containers that differ only around
     // it are translated once, the others listed as duplicates of it.

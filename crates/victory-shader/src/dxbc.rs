@@ -16,6 +16,7 @@ use crate::ShaderError;
 pub struct FourCC(pub [u8; 4]);
 
 impl FourCC {
+    pub const ACCC: FourCC = FourCC(*b"ACCC");
     pub const DXIL: FourCC = FourCC(*b"DXIL");
     pub const STAT: FourCC = FourCC(*b"STAT");
     pub const RTS0: FourCC = FourCC(*b"RTS0");

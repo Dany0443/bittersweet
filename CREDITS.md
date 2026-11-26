@@ -199,3 +199,12 @@ Source `crates/victory-shader/src/emit/lower.rs` SHA-256:
 `086faeb508aaf4d0a50d2bd3c8439402fbb212f51c26631fb10e4382afb16dfd`.
 Source synthetic tests `crates/victory-shader/src/emit/size_tests.rs` SHA-256:
 `feac08a488c9c782f2a1974b214ddf89c90a059662d54943667c89c6380de925`.
+
+## ACCC compute containers
+
+ACCC/FSPX parsing follows `Marvisak/VIctory` commit
+`63bcca43c6a00a758510398fa43096ce7e4f7df0`, including its synthetic
+parser fixtures. Runtime and offline translation select ACCC when a DXIL
+part is absent. Tests cover resource metadata, wave sizes, malformed
+records and complete synthetic container translation. This establishes
+container support; remaining instruction gaps prevent a complete upscale.

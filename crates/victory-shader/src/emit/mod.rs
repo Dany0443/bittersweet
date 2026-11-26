@@ -288,7 +288,8 @@ pub fn translate(container: &[u8]) -> Result<HostShader, ShaderError> {
     let c = Container::parse(container)?;
     let dxil = c
         .part(FourCC::DXIL)
-        .ok_or(ShaderError::Malformed("no DXIL part"))?;
+        .or_else(|| c.part(FourCC::ACCC))
+        .ok_or(ShaderError::Malformed("no DXIL or ACCC part"))?;
     let native = crate::native_programs(dxil.data)?
         .into_iter()
         .find(|p| {

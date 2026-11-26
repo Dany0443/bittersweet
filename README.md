@@ -47,6 +47,9 @@ hardware readback tests under GE-Proton11-14. Mission execution remains
 unverified.
 Shader translation recognizes dimension-only reads of 2D texture and
 structured-buffer descriptors, with synthetic GPU readback coverage.
+ACCC compute containers are parsed and translated through the same native
+shader path. Some upscaler instructions remain unsupported, so this does
+not yet establish a working console upscale.
 
 ## Layout
 
