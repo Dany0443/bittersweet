@@ -262,6 +262,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn our_blobs_deserialize_on_the_host() {
+        use super::*;
+        use crate::object::{S_OK, slot};
         use windows::Win32::Graphics::Direct3D12::ID3D12RootSignatureDeserializer;
         use windows::core::Interface;
         let desc = VersionedDesc {
@@ -300,6 +302,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn versioned_descriptions_serialize_on_the_host() {
+        use super::*;
+        use crate::object::{S_OK, slot};
         let desc = VersionedDesc {
             version: 1,
             desc: Desc {
