@@ -210,6 +210,18 @@ pub fn build(profile: &HostReport, cache_root: &Path, proton: bool) -> TuningPla
     // Ray tracing is an experiment on every tracked build in the table.
     put!("BITTERSWEET_ENABLE_RT", "0");
 
+    // A card whose texture budget is well below its own size loses time to
+    // eviction and long waits. These are the settings the 8 GB port
+    // (Linox-IDK/LNX-victory, commit acea637) runs with; the inherited
+    // runtime reads all of them.
+    if matches!(budget.pressure, crate::vram::Pressure::High | crate::vram::Pressure::Severe) {
+        put!("VICTORY_TEXTURE_NO_WAIT", "1");
+        put!("VICTORY_PIPELINE_WAIT_MS", "50");
+        put!("VICTORY_SHADER_LOOP_LIMIT", "1024");
+        put!("VICTORY_CARD_REHASH_RUNS", "1");
+        put!("VICTORY_JOIN_COPIES", "1");
+    }
+
     match vendor {
         Vendor::Amd => {
             put!("AMD_VULKAN_ICD", "RADV");
@@ -430,6 +442,25 @@ mod tests {
                 .iter()
                 .any(|a| a.text.contains("mesh pipelines disabled"))
         );
+    }
+
+    #[test]
+    fn an_8gb_plan_uses_the_low_vram_runtime_settings() {
+        let plan = plan_for_ids(0x1002, 0x731f, 8192, Path::new("/tmp/bs"));
+        let get = |k: &str| {
+            plan.env
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(get("VICTORY_TEXTURE_NO_WAIT"), Some("1"));
+        assert_eq!(get("VICTORY_PIPELINE_WAIT_MS"), Some("50"));
+        assert_eq!(get("VICTORY_SHADER_LOOP_LIMIT"), Some("1024"));
+        assert_eq!(get("VICTORY_CARD_REHASH_RUNS"), Some("1"));
+        assert_eq!(get("VICTORY_JOIN_COPIES"), Some("1"));
+
+        let roomy = plan_for_ids(0x1002, 0x7550, 16384, Path::new("/tmp/bs"));
+        assert!(!roomy.env.iter().any(|(k, _)| k.starts_with("VICTORY_")));
     }
 
     #[test]
