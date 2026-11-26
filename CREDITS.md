@@ -170,6 +170,14 @@ retains this tree's rectangle and layer composition handling and adds the
 six missing option words. Source file SHA-256:
 `b1bd87c602264b182ba5edd33a3dc9840ec86a0e71329355fb8be3b3e24d9713`.
 
+Depth-bounds pipeline and command-list handling are adapted from
+**DoubleGhosty/cool_fox**, commit
+`c96b4f2b8365bf43d54ab074940923ef8267f4c6` (the depth-bounds portion of
+upstream PR #82 by Kaivyyy). The port preserves the `DEPTH_STENCIL1` flag,
+uses pipeline streams when the host supports depth bounds, and replays
+dynamic bounds after command-list cuts. A focused test covers state parsing
+and pipeline-key differentiation. GPL-3.0-or-later.
+
 ## Wine helper pipeline adaptation
 
 Explicit helper root-signature serialization follows
