@@ -1537,6 +1537,26 @@ mod tests {
     }
 
     #[test]
+    fn file_reads_keep_all_offset_bits_above_four_gib() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sparse-high-offset.bin");
+        let offset = (1u64 << 36) + 0x1234;
+        let marker = b"high-offset synthetic marker";
+        let mut writer = std::fs::File::create(&path).unwrap();
+        writer.set_len(offset + marker.len() as u64).unwrap();
+        writer.seek(SeekFrom::Start(offset)).unwrap();
+        writer.write_all(marker).unwrap();
+        drop(writer);
+
+        let files = Files::new(std::fs::File::open(path).unwrap(), Io::Shared);
+        let mut actual = vec![0; marker.len()];
+        assert_eq!(files.read_at(&mut actual, offset).unwrap(), marker.len());
+        assert_eq!(actual, marker);
+    }
+
+    #[test]
     fn request_layout_is_the_titles() {
         assert_eq!(size_of::<Request>(), 0x48);
         assert_eq!(std::mem::offset_of!(Request, destination_size), 0x18);
