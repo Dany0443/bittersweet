@@ -266,3 +266,8 @@ System-memory caches now become eligible for cleanup sooner when available RAM
 falls below 5 GiB and 3 GiB, following LoverCatys/ruff-lab commit `3f43861`.
 This changes the existing idle timeouts from 10/5/2 seconds to 8/3.5/1.5
 seconds, respectively.
+
+The optional `VICTORY_COMMIT_RESERVE_MB` setting also pauses new indexed
+texture copies and shortens idle-copy retention when Windows commit approaches
+the configured reserve. This follows `ruff-lab` commit `bffe04b` and its
+attribution to ka1qux/BRVIctory-ka1qux commit `8cac16489a`.

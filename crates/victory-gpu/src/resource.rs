@@ -1416,6 +1416,9 @@ pub(crate) fn room() -> bool {
         mb.trim().parse::<u64>().ok().map(|mb| mb << 20)
     });
     let filled = KINDS[1].load(Relaxed);
+    if filled >= FLOOR && commit_short(100) {
+        return false;
+    }
     if let Some(limit) = limit {
         return filled < limit;
     }
@@ -1426,6 +1429,64 @@ pub(crate) fn room() -> bool {
         Some([budget, used, ..]) => used < budget / 10 * 9,
         None => filled < WITHOUT_BUDGET,
     }
+}
+
+/// Windows commit the texture queue leaves free, in bytes:
+/// `VICTORY_COMMIT_RESERVE_MB` (0 by default; at most 32,768). VRAM-backed
+/// textures also consume system commit, so this can leave headroom on 16 GB
+/// RAM systems. Adapted from LoverCatys/ruff-lab commit `3f43861`, which
+/// carries the original adaptation from ka1qux/BRVIctory-ka1qux.
+#[cfg(windows)]
+fn commit_reserve() -> u64 {
+    static RESERVE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *RESERVE.get_or_init(|| {
+        let reserve = std::env::var("VICTORY_COMMIT_RESERVE_MB")
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map_or(0, |mb| mb.min(32_768) << 20);
+        if reserve > 0 {
+            tracing::info!(
+                reserve_mb = reserve >> 20,
+                "VICTORY_COMMIT_RESERVE_MB: limiting new indexed textures under commit pressure"
+            );
+        }
+        reserve
+    })
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn short_of_commit(left: u64, reserve: u64, percent: u64) -> bool {
+    let threshold = (u128::from(reserve) * u128::from(percent) / 100)
+        .min(u128::from(u64::MAX)) as u64;
+    reserve > 0 && left < threshold
+}
+
+#[cfg(windows)]
+fn commit_short(percent: u64) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    let reserve = commit_reserve();
+    if reserve == 0 {
+        return false;
+    }
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static LEFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tenth = crate::host::now_ms() / 100 + 1;
+    let left = if LAST.load(Relaxed) == tenth {
+        LEFT.load(Relaxed)
+    } else {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        // SAFETY: plain data filled in by the system query.
+        let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        // SAFETY: a correctly sized structure; query failure means no limit.
+        if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 {
+            return false;
+        }
+        LEFT.store(status.ullAvailPageFile, Relaxed);
+        LAST.store(tenth, Relaxed);
+        status.ullAvailPageFile
+    };
+    short_of_commit(left, reserve, percent)
 }
 
 /// Lets go of the host copies of textures the title fills that nothing
@@ -1459,7 +1520,10 @@ pub(crate) fn let_go_idle() {
     if !*ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_SWEEP").is_none_or(|v| v != "0")) {
         return;
     }
-    let idle_ms = crate::host::vram_idle_ms(crate::host::host().and_then(|h| h.video_memory()));
+    let mut idle_ms = crate::host::vram_idle_ms(crate::host::host().and_then(|h| h.video_memory()));
+    if commit_short(100) {
+        idle_ms = idle_ms.min(1_000);
+    }
     // For the trail (`crate::host::trail`): how many went, their bytes,
     // and the first one.
     let (mut went, mut bytes, mut first) = (0u64, 0u64, None);
@@ -2424,6 +2488,16 @@ static RESOURCE_FUNCTIONS: Table<32> = {
 mod tests {
     use super::*;
     use crate::object::slot;
+
+    #[test]
+    fn commit_reserve_only_blocks_below_the_configured_headroom() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert!(!short_of_commit(0, 0, 100));
+        assert!(short_of_commit(5 * GIB - 1, 5 * GIB, 100));
+        assert!(!short_of_commit(5 * GIB, 5 * GIB, 100));
+        assert!(short_of_commit(2 * GIB - 1, 4 * GIB, 50));
+        assert!(!short_of_commit(2 * GIB, 4 * GIB, 50));
+    }
 
     #[test]
     fn only_out_of_memory_texture_failures_are_retried() {
