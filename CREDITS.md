@@ -91,6 +91,13 @@ repository.
   The helper is portable and checksum-equivalence tests run on Linux; the
   four texture-runtime call sites remain Windows-target code. No title or
   frame-time measurement was performed. GPL-3.0-or-later.
+- **JMAN730/project-flamingo #405**, commit
+  `74c87f82d6dcbaaafc857aeb96d26790052d87c8`: GFX10 lowering for
+  `v_mad_u32_u16`, `v_mad_i32_i16`, and `v_lerp_u8`. Adapted to bittersweet's
+  integer operand decoding; unsupported modifiers remain rejected. This
+  commit is also present in the high-rated Belobug AMD fork. Linux lowering
+  tests cover translation, with runtime cases for Windows GPU/WARP. No RX
+  hardware run was performed. GPL-3.0-or-later.
 
 ## Reference only, no code copied
 

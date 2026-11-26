@@ -7051,6 +7051,77 @@ impl<'a> Lower<'a> {
             return self.packed16(inst, op, guard);
         }
         match name {
+            // 16x16 to 32-bit multiply-add. op_sel chooses each source half;
+            // the third operand and result remain full width.
+            "v_mad_u32_u16" | "v_mad_i32_i16" => {
+                if v.clamp
+                    || v.omod != 0
+                    || v.abs != 0
+                    || v.neg != 0
+                    || v.opsel & !3 != 0
+                    || v.opsel_hi != 0
+                {
+                    return Err("modifiers on 16-bit integer multiply-add");
+                }
+                let (mut a, mut b) = (self.half_src_i16(inst, 0)?, self.half_src_i16(inst, 1)?);
+                if name == "v_mad_i32_i16" {
+                    let shift = self.s.m.i32(16);
+                    let sign_extend = |l: &mut Self, x| {
+                        let shifted = l.s.m.bin(c, Bin::Shl, x, shift);
+                        l.s.m.bin(c, Bin::AShr, shifted, shift)
+                    };
+                    a = sign_extend(self, a);
+                    b = sign_extend(self, b);
+                }
+                let addend = s(self, 2)?;
+                let product = self.s.m.bin(c, Bin::Mul, a, b);
+                let result = self.s.m.bin(c, Bin::Add, product, addend);
+                int(self, result)
+            }
+            // Four independent rounded unsigned byte averages. src2 supplies
+            // one round-up bit per byte.
+            "v_lerp_u8" => {
+                if v.clamp
+                    || v.omod != 0
+                    || v.abs != 0
+                    || v.neg != 0
+                    || v.opsel != 0
+                    || v.opsel_hi != 0
+                {
+                    return Err("modifiers on packed byte average");
+                }
+                let (a, b, round) = (s(self, 0)?, s(self, 1)?, s(self, 2)?);
+                let (mask, one) = (self.s.m.i32(0xFF), self.s.m.i32(1));
+                let mut result = self.s.m.i32(0);
+                for byte_index in 0..4u32 {
+                    let (x, y, bias) = if byte_index == 0 {
+                        (a, b, round)
+                    } else {
+                        let shift = self.s.m.i32(byte_index * 8);
+                        (
+                            self.s.m.bin(c, Bin::LShr, a, shift),
+                            self.s.m.bin(c, Bin::LShr, b, shift),
+                            self.s.m.bin(c, Bin::LShr, round, shift),
+                        )
+                    };
+                    let (x, y) = (
+                        self.s.m.bin(c, Bin::And, x, mask),
+                        self.s.m.bin(c, Bin::And, y, mask),
+                    );
+                    let bias = self.s.m.bin(c, Bin::And, bias, one);
+                    let sum = self.s.m.bin(c, Bin::Add, x, y);
+                    let sum = self.s.m.bin(c, Bin::Add, sum, bias);
+                    let value = self.s.m.bin(c, Bin::LShr, sum, one);
+                    let value = if byte_index == 0 {
+                        value
+                    } else {
+                        let shift = self.s.m.i32(byte_index * 8);
+                        self.s.m.bin(c, Bin::Shl, value, shift)
+                    };
+                    result = self.s.m.bin(c, Bin::Or, result, value);
+                }
+                int(self, result)
+            }
             "v_mad_u64_u32" => {
                 // a * b + c, c and the result 64 bits wide; the carry out
                 // of the sum is this lane's bit of the mask it names.
@@ -8226,6 +8297,36 @@ impl<'a> Lower<'a> {
         };
         let m = self.s.m.i32(0xFFFF);
         Ok(self.s.m.bin(c, Bin::And, x, m))
+    }
+
+    /// Source `k` of a 16-bit integer operation as a zero-extended word.
+    /// Inline float operands keep their encoded f32 bits, as GFX10 specifies.
+    fn half_src_i16(&mut self, inst: &Inst, k: usize) -> Result<V, Why> {
+        let Fields::Valu(v) = &inst.fields else {
+            unreachable!()
+        };
+        let op = *v.src.get(k).ok_or("a missing operand")?;
+        let mut high = v.opsel >> k & 1 != 0;
+        if let Some(sd) = v.sdwa {
+            match sd.src_sel.get(k).copied().unwrap_or(6) {
+                4 | 6 => {}
+                5 => high = true,
+                _ => return Err("a byte select on a 16-bit operation"),
+            }
+        }
+        let x = match self.src0 {
+            Some(x) if k == 0 => x,
+            _ => self.operand(inst, &op)?,
+        };
+        let c = self.cur;
+        let x = if high {
+            let shift = self.s.m.i32(16);
+            self.s.m.bin(c, Bin::LShr, x, shift)
+        } else {
+            x
+        };
+        let mask = self.s.m.i32(0xFFFF);
+        Ok(self.s.m.bin(c, Bin::And, x, mask))
     }
 
     /// An f16 source as an f32 (exact), with its abs/neg modifiers.
@@ -11989,6 +12090,39 @@ mod tests {
             mesh_stride: 0,
         })
         .map(|_| ())
+    }
+
+    /// Packed integer VALU operations used by RDNA shader code must translate
+    /// when their result is consumed by LDS.
+    #[test]
+    fn lowers_16x16_mad_and_packed_byte_average() {
+        let vop3 = |op: u16, opsel: u8, vdst: u8, s0: u32, s1: u32, s2: u32| -> [u32; 2] {
+            [
+                0x35 << 26 | (op as u32 & 0x3FF) << 16 | (opsel as u32 & 0xF) << 11 | vdst as u32,
+                (s0 & 0x1FF) | (s1 & 0x1FF) << 9 | (s2 & 0x1FF) << 18,
+            ]
+        };
+        let (v0, v1, v2) = (256u32, 257, 258);
+        let lowers_and_stores = |op_words: [u32; 2]| {
+            let mut words = vec![
+                0x7E00_0283, // v_mov_b32 v0, 3
+                0x7E02_0285, // v_mov_b32 v1, 5
+                0x7E04_0287, // v_mov_b32 v2, 7
+            ];
+            words.extend_from_slice(&op_words);
+            words.extend_from_slice(&[
+                0x7E06_0280, // v_mov_b32 v3, 0
+                0xD834_0000,
+                0x0000_0003, // ds_write_b32 v3, v0
+                S_ENDPGM,
+            ]);
+            lowers(&words, (2 << 1) | (1 << 15)).unwrap();
+        };
+
+        lowers_and_stores(vop3(0x373, 0, 0, v0, v1, v2));
+        lowers_and_stores(vop3(0x373, 0b0011, 0, v0, v1, v0));
+        lowers_and_stores(vop3(0x375, 0, 0, v0, v1, v2));
+        lowers_and_stores(vop3(0x14D, 0, 0, v0, v1, v2));
     }
 
     /// Lowers a compute program with the root parameters `layout` (in user

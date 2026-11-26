@@ -273,6 +273,58 @@ fn run_cases(
     run_cases_on(shader, cases, &[("hardware", false), ("warp", true)], check);
 }
 
+/// GFX10 packed integer VALU operations, including selected source halves.
+#[test]
+fn mad_u32_u16_i32_i16_and_lerp_u8() {
+    let vop3_opsel = |op: u16, vdst: u8, s0: u16, s1: u16, s2: u16, opsel: u8| -> [u32; 2] {
+        let [w0, w1] = vop3(op, vdst, s0, s1, s2);
+        [w0 | (u32::from(opsel) << 11), w1]
+    };
+    let mad_u = build_valu_cs(&vop3(0x373, 0, vgpr(1), vgpr(2), vgpr(3)));
+    let mad_u_hi = build_valu_cs(&vop3_opsel(0x373, 0, vgpr(1), vgpr(2), vgpr(3), 0b0011));
+    let mad_i = build_valu_cs(&vop3(0x375, 0, vgpr(1), vgpr(2), vgpr(3)));
+    let mad_i_hi = build_valu_cs(&vop3_opsel(0x375, 0, vgpr(1), vgpr(2), vgpr(3), 0b0011));
+    let lerp = build_valu_cs(&vop3(0x14d, 0, vgpr(1), vgpr(2), vgpr(3)));
+
+    let mad_u_cases: &[([u32; 4], u32)] = &[
+        ([3, 5, 7, 0], 22),
+        ([0x0001_0003, 0x0002_0005, 7, 0], 22),
+        ([0xFFFF, 0xFFFF, 1, 0], 0xFFFE_0002),
+    ];
+    let mad_u_hi_cases: &[([u32; 4], u32)] = &[
+        ([0x0004_0003, 0x0006_0005, 7, 0], 31),
+        ([0xFFFF_0001, 0x0002_FFFF, 0, 0], 0x1_FFFE),
+    ];
+    let mad_i_cases: &[([u32; 4], u32)] = &[
+        ([3, 5, 7, 0], 22),
+        ([0xFFFE, 3, 1, 0], (-5i32) as u32),
+        ([0xFFFF, 0xFFFF, 0, 0], 1),
+        ([0x8000, 0x8000, 0xC000_0000, 0], 0),
+    ];
+    let mad_i_hi_cases: &[([u32; 4], u32)] = &[
+        ([0xFFFE_0001, 0x0003_FFFF, 1, 0], (-5i32) as u32),
+    ];
+    let lerp_cases: &[([u32; 4], u32)] = &[
+        ([0x03_02_01_00, 0x07_06_05_04, 0, 0], 0x05_04_03_02),
+        ([1, 0, 1, 0], 1),
+        ([0x07_05_03_01, 0x08_06_04_02, 0x01_00_01_01, 0], 0x08_05_04_02),
+        ([0xFF_00_80_40, 0x01_00_80_40, 0x01_01_00_00, 0], 0x80_00_80_40),
+    ];
+
+    for (shader, cases, what) in [
+        (&mad_u, mad_u_cases, "v_mad_u32_u16"),
+        (&mad_u_hi, mad_u_hi_cases, "v_mad_u32_u16 high halves"),
+        (&mad_i, mad_i_cases, "v_mad_i32_i16"),
+        (&mad_i_hi, mad_i_hi_cases, "v_mad_i32_i16 high halves"),
+        (&lerp, lerp_cases, "v_lerp_u8"),
+    ] {
+        let inputs: Vec<[u32; 4]> = cases.iter().map(|case| case.0).collect();
+        run_cases(shader, &inputs, |backend, i, _, got| {
+            assert_eq!(got, cases[i].1, "{backend}: {what} case {i}");
+        });
+    }
+}
+
 fn run_cases_on(
     shader: &HostShader,
     cases: &[[u32; 4]],
