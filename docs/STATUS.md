@@ -14,13 +14,24 @@ should research current upstream sources when a task depends on them.
 | Host plan | `bittersweet plan` writes cache paths, VRAM budget, wave policy, vendor flags |
 | Setup | `setup.sh` prepares Proton-GE, prefix and `vm.max_map_count`; idempotent |
 | Windows runtime | Windows-target release cross-builds on Linux; account/player prompt rendered under GE-Proton11-12 |
-| First mission | Not verified; current source checks pass and startup renders the publisher logo |
+| First mission | Not verified; world draw submission is reached, but the main presentation plane remains nearly black |
 
 Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
 Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
 account/player prompt rendered after the presentation fixes. Synthetic GPU
 tests under Proton create both compositor and both depth-helper pipelines.
 These observations do not establish mission compatibility or world frame times.
+
+Further tests with GE-Proton11-14 (vkd3d-proton revision
+`v3.1-83-gcae8353ed`) passed the mesh-conversion abort observed with
+GE-Proton11-12. The GPU memory-comparison helper now compiles and passes
+synthetic hardware readback for changed pieces and hash updates. A title
+run used that path and reached world draw submission. A separate run
+selected the main presentation plane and read it back directly: the
+observed world frames remained nearly black, independently of overlay
+composition. Shader translation still rejects descriptor-only data reads
+and some compute programs. RAM and swap pressure also causes long frame
+times on this 14 GiB host. Neither test verifies the first mission.
 
 ## What is missing
 
