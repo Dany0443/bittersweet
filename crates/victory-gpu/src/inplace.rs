@@ -465,15 +465,24 @@ impl Rig {
     /// A compute shader stores, through a root unordered-access view at
     /// `gpu`, the sum of the buffer's first two words in its third.
     fn shade(&mut self, gpu: u64) -> windows::core::Result<()> {
-        const SOURCE: &str = "#define RS \"UAV(u0)\"\nRWByteAddressBuffer b : register(u0);\n[RootSignature(RS)]\n[numthreads(1, 1, 1)]\nvoid main() { b.Store(8, b.Load(0) + b.Load(4)); }\n";
+        const SOURCE: &str = "#define RS \"UAV(u0)\"\nRWStructuredBuffer<uint> b : register(u0);\n[RootSignature(RS)]\n[numthreads(1, 1, 1)]\nvoid main() { b[2] = b[0] + b[1]; }\n";
         let mut code: Option<ID3DBlob> = None;
-        // SAFETY: the source and names live through the call; then the
-        // blob's own bytes, which hold the root signature too.
+        let parameter = D3D12_ROOT_PARAMETER1 {
+            ParameterType: D3D12_ROOT_PARAMETER_TYPE_UAV,
+            Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                    Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                    ..Default::default()
+                },
+            },
+            ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+        };
+        let root = crate::host::helper_root_signature(&self.device, &[parameter], &[])?;
+        // SAFETY: the source, shader blob and matching root signature are live.
         let (root, pso): (ID3D12RootSignature, ID3D12PipelineState) = unsafe {
             D3DCompile(SOURCE.as_ptr().cast(), SOURCE.len(), s!("inplace"), None, None, s!("main"), s!("cs_5_1"), 0, 0, &mut code, None)?;
             let code = code.ok_or_else(windows::core::Error::empty)?;
             let bytes = std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-            let root: ID3D12RootSignature = self.device.CreateRootSignature(0, bytes)?;
             let pso = self.device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&root),
                 CS: D3D12_SHADER_BYTECODE { pShaderBytecode: bytes.as_ptr().cast(), BytecodeLength: bytes.len() },
@@ -1018,6 +1027,21 @@ pub(crate) fn tick() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_shader_writes_the_shared_buffer() {
+        let host = crate::host::host().expect("host GPU");
+        let (buffer, data) = host.shared_buffer(12).expect("probe buffer");
+        // SAFETY: the mapped buffer holds three dwords and shade waits for the GPU.
+        unsafe {
+            data.cast::<[u32; 3]>().write([40, 2, 0]);
+            Rig::new(&host.device)
+                .unwrap()
+                .shade(buffer.GetGPUVirtualAddress())
+                .unwrap();
+            assert_eq!(data.cast::<[u32; 3]>().read(), [40, 2, 42]);
+        }
+    }
 
     /// Views as the runtime tells them: a range inside one view, or over
     /// views that continue each other in one section, is one run; over

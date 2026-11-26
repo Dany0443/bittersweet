@@ -222,3 +222,8 @@ signatures for Wine, following the helper-pipeline technique above.
 The scaler's root-signature attribute uses one string literal because
 Wine rejects adjacent literals there. Focused Proton tests reproduce
 both pipeline-creation failures before the changes and pass afterward.
+
+The memory-import probe applies that same Wine helper technique: explicit
+UAV root serialization and structured-buffer accesses. Synthetic hardware
+readback verifies that its shader writes reach the CPU-visible buffer.
+This repairs the probe and does not itself establish title-memory imports.
