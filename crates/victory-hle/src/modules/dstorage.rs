@@ -1109,6 +1109,8 @@ fn inflate(source: &[u8], out: &mut [u8]) -> Result<usize, HRESULT> {
             other => {
                 tracing::warn!(
                     ?other,
+                    detail = state.error_message().unwrap_or("unknown"),
+                    zlib_header_valid = valid_zlib_header(source),
                     source_bytes = source.len(),
                     destination_bytes = out_len,
                     consumed = state.total_in(),
@@ -1119,6 +1121,15 @@ fn inflate(source: &[u8], out: &mut [u8]) -> Result<usize, HRESULT> {
             }
         }
     })
+}
+
+/// Whether the first two bytes form an RFC 1950 zlib header. Only the result
+/// is logged so runtime diagnostics never print data read from the game file.
+fn valid_zlib_header(source: &[u8]) -> bool {
+    let Some((&cmf, &flg)) = source.first().zip(source.get(1)) else {
+        return false;
+    };
+    cmf & 0x0f == 8 && cmf >> 4 <= 7 && (u16::from(cmf) * 256 + u16::from(flg)).is_multiple_of(31)
 }
 
 /// The BCPack format's constant tables, parsed once for the process. If
@@ -1517,6 +1528,14 @@ mod tests {
         let (packed, rc) = zlib_rs::compress_slice(&mut buf, plain, zlib_rs::DeflateConfig::new(6));
         assert_eq!(rc, zlib_rs::ReturnCode::Ok);
         packed.to_vec()
+    }
+
+    #[test]
+    fn zlib_header_check_rejects_short_or_invalid_headers() {
+        assert!(valid_zlib_header(&compress_zlib(b"test")));
+        assert!(!valid_zlib_header(&[]));
+        assert!(!valid_zlib_header(&[0x78]));
+        assert!(!valid_zlib_header(&[0, 0]));
     }
 
     #[test]
