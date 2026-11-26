@@ -15,6 +15,10 @@
 //! share, [`console`] which console model the title sees. Planned:
 //! `present` (swap chain).
 
+// The Linux build includes shared object models and policy helpers, while
+// their D3D12 callers are intentionally compiled only on Windows.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
 pub mod console;

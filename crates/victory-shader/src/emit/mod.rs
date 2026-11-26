@@ -771,7 +771,6 @@ fn signature(part: &[u8]) -> Result<Vec<container::SigElement>, ShaderError> {
 
 #[cfg(test)]
 mod tests {
-    use super::bitcode::Attr;
     use super::lower::LOOP_LIMIT;
     use super::parse_loop_limit;
 
@@ -797,7 +796,6 @@ mod tests {
         }
     }
     use super::container::SigElement;
-    use super::shader::Shader;
     use super::*;
     use crate::native::{ComputeIo, StageIo};
 
@@ -1367,7 +1365,7 @@ mod tests {
         let st = crate::structure::structure(&p).unwrap();
         let res = crate::resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
         let io = crate::io::raise(&p, &native).unwrap();
-        let out = super::emit(&c, &native, &p, &st, &io, &res).unwrap();
+        let _out = super::emit(&c, &native, &p, &st, &io, &res).unwrap();
         #[cfg(windows)]
         if let Ok(mut v) = super::validator::Validator::load(
             super::validator::Validator::default_path().as_deref(),
@@ -1529,18 +1527,19 @@ mod tests {
             mesh_stride: 0,
         })
         .unwrap();
-        let mut dxil = l.dxil;
+        #[allow(unused_mut)]
+        let mut _dxil = l.dxil;
         #[cfg(windows)]
         if let Ok(mut v) = super::validator::Validator::load(
             super::validator::Validator::default_path().as_deref(),
         ) {
-            v.validate(&mut dxil).unwrap();
+            v.validate(&mut _dxil).unwrap();
         }
         #[cfg(windows)]
         if let Ok(host) = super::host::Host::new(false) {
             let cs = super::HostShader {
                 stage: super::HwStage::Cs,
-                dxil,
+                dxil: _dxil,
                 user_data: l.user_data,
                 samplers: Vec::new(),
                 static_samplers: Vec::new(),

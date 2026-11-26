@@ -175,11 +175,10 @@ fn write(bytes: &mut [u8], at: usize, v: &[u8]) -> Result<(), PrepareError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(windows)]
     #[test]
     fn patches_own_test_binary() {
+        use super::*;
         let original = std::fs::read(std::env::current_exe().unwrap()).unwrap();
         let prepared = prepare(&original).unwrap();
         assert!(!prepared.info.is_dll(), "info describes the original");

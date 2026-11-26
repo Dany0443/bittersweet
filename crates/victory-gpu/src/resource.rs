@@ -254,7 +254,7 @@ pub(crate) fn pc_format(format: u32) -> u32 {
 /// if a pass turns out to need one.
 pub(crate) fn target_format(format: u32) -> u32 {
     const STAND_INS: [(u32, u32); 3] = [(86, 28), (115, 28), (67, 10)];
-    let Some(i) = STAND_INS.iter().position(|&(f, _)| f == format) else {
+    let Some(_i) = STAND_INS.iter().position(|&(f, _)| f == format) else {
         return format;
     };
     #[cfg(windows)]
@@ -291,8 +291,8 @@ pub(crate) fn target_format(format: u32) -> u32 {
                 refused
             })
         });
-        if refused[i] {
-            return STAND_INS[i].1;
+        if refused[_i] {
+            return STAND_INS[_i].1;
         }
     }
     format

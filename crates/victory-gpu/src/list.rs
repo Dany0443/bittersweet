@@ -630,6 +630,7 @@ extern "system" fn close(this: This) -> HRESULT {
     if let Some(host) = host_list(this) {
         host.close();
     }
+    let _ = this;
     S_OK
 }
 extern "system" fn reset(this: This, allocator: This, pipeline: This) -> HRESULT {
@@ -780,6 +781,8 @@ extern "system" fn barrier(this: This, count: u32, barriers: *const Barrier) -> 
             unsafe { list.list.ResourceBarrier(host) };
         }
     }
+    #[cfg(not(windows))]
+    let _ = (this, count, barriers);
     0
 }
 
@@ -1707,7 +1710,11 @@ extern "system" fn execute_indirect(
         return;
     };
     let address = crate::resource::buffer_bytes(arguments).map(|(p, _)| p as u64 + offset);
+    #[cfg(windows)]
     let counter = crate::resource::buffer_bytes(count).map(|(p, _)| p as u64 + count_offset);
+    #[cfg(not(windows))]
+    let _ = (this, count_offset);
+    #[cfg(windows)]
     let mut ran = false;
     #[cfg(windows)]
     if let ([[kind, ..]], Some(address)) = (args, address)
@@ -1727,6 +1734,12 @@ extern "system" fn execute_indirect(
             count.is_null() || counter.is_some()
         ));
     }
+    #[cfg(windows)]
+    if ran {
+        return;
+    }
+    #[cfg(not(windows))]
+    let ran = false;
     if ran {
         return;
     }

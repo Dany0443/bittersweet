@@ -6449,7 +6449,7 @@ impl<'a> Lower<'a> {
     /// A handle for the descriptor `src` read at `site`.
     fn handle(
         &mut self,
-        site: Site,
+        _site: Site,
         src: &Source,
         sampler: bool,
         props: (u32, u32),

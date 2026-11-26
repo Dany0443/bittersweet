@@ -51,7 +51,7 @@ type SerializeVersioned =
     unsafe extern "system" fn(*const VersionedDesc, *mut *mut c_void, *mut *mut c_void) -> HRESULT;
 
 /// An export of the host's `d3d12.dll` in System32, looked up once.
-fn host_export(cache: &OnceLock<Option<usize>>, name: &CStr) -> Option<usize> {
+fn host_export(cache: &OnceLock<Option<usize>>, _name: &CStr) -> Option<usize> {
     *cache.get_or_init(|| {
         #[cfg(windows)]
         {
@@ -71,7 +71,7 @@ fn host_export(cache: &OnceLock<Option<usize>>, name: &CStr) -> Option<usize> {
                 return None;
             }
             // SAFETY: a loaded module and a NUL-terminated name.
-            unsafe { GetProcAddress(module, name.as_ptr().cast()) }.map(|f| f as usize)
+            unsafe { GetProcAddress(module, _name.as_ptr().cast()) }.map(|f| f as usize)
         }
         #[cfg(not(windows))]
         None
@@ -214,13 +214,12 @@ static FUNCTIONS: Table<24> = {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::object::{S_OK, slot};
-
     /// One 32-bit constant at b0, serialized by the host, then created.
     #[cfg(windows)]
     #[test]
     fn host_serialized_blobs_create_root_signatures() {
+        use super::*;
+        use crate::object::{S_OK, slot};
         use windows::Win32::Graphics::Direct3D12::{
             D3D12_ROOT_CONSTANTS, D3D12_ROOT_PARAMETER, D3D12_ROOT_PARAMETER_0,
             D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS, D3D12_SHADER_VISIBILITY_ALL,

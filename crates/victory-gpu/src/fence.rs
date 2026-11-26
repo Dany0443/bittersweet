@@ -155,12 +155,11 @@ static FUNCTIONS: Table<24> = {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::object::slot;
-
     #[cfg(windows)]
     #[test]
     fn signals_set_waiting_events() {
+        use super::*;
+        use crate::object::slot;
         use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 

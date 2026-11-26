@@ -174,12 +174,11 @@ static VTABLE: Methods<8> = Methods([
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::modules::xgameruntime::method;
-
     #[cfg(windows)]
     #[test]
     fn serves_a_drive_over_the_title_folder_and_its_quota() {
+        use super::*;
+        use crate::modules::xgameruntime::method;
         type Size = extern "system" fn(This, *mut usize) -> HRESULT;
         type Get = extern "system" fn(This, usize, *mut u8, *mut usize) -> HRESULT;
         type Space = extern "system" fn(This, *mut SpaceInfo) -> HRESULT;

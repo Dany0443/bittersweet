@@ -47,6 +47,7 @@ pub mod xuser;
 use crate::HleModule;
 
 pub(crate) fn all() -> Vec<HleModule> {
+    #[allow(unused_mut)]
     let mut all = vec![
         kernel::module(),
         xgameruntime::module(),
