@@ -182,7 +182,11 @@ Normalized typed-buffer conversion follows **DoubleGhosty/cool_fox**, commit
 `9a6c829d6818a0ca0f1029d417e1e5eef6714eae`. The port uses integer quotient
 construction for correctly rounded 8-, 10-, and 16-bit UNORM/SNORM loads.
 Hardware and WARP regression cases cover normalized values and code
-round-trips. GPL-3.0-or-later.
+round-trips. The port also marks dynamically selected typed integer buffer
+views and preserves their 16-bit integer payloads during `d16` loads and
+stores. Descriptor classification tests cover integer, signed, normalized,
+raw, and structured views. GPU execution of the `d16` path remains
+unverified. GPL-3.0-or-later.
 
 ## Wine helper pipeline adaptation
 
