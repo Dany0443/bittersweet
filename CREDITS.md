@@ -63,6 +63,14 @@ repository.
   Local adaptation ballots the structurised EXEC guard, and keeps mesh quad
   activity checks quad-local. The pixel Valid-Mask/export rewrite is not part
   of this port. Synthetic shader tests run on Linux; GPU execution is unverified.
+- **Marvisak/VIctory PR #2493**, merge
+  `f3578e386ea0f06153445af10a698df029620aad` (head
+  `6cd2489d552c765f7fd4b327f5bf78493f090589`): decode the inline float
+  constants 240..=248 as half values in whole-wave `v_add_f16` simulation.
+  They were read through the f32 inline table, whose low bits made some of
+  them look like an additive zero, so a wave sum could be folded as if the
+  step were an identity. A focused wave32 test covers the zero identity and
+  all nine inline constants.
 - **Belobug/VIctory-Belobug-AMD PR #83**, head
   `803b19b710a6731cf84d923728d8aa43b6c4f55f` (dutch2005), from
   **Marvisak/VIctory #2406** (makmatvey): test raw VCC independently of EXEC
