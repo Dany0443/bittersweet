@@ -23,9 +23,9 @@ This is a work in progress. Be clear about what works today:
   `bittersweet plan` inspect the machine and emit an environment file.
 - **Experimental Proton startup is verified.** A Windows-target release
   built on Linux starts under GE-Proton11-12 and renders the account/player
-  prompt through vkd3d-proton. The first mission is not verified. The local
-  startup attempt failed after compressed reads encountered zero-filled
-  source data; completing gameplay validation requires valid user files.
+  prompt and publisher startup logo through vkd3d-proton. The first mission
+  is not verified. The current source ranges pass decompression checks;
+  the earlier zero-filled source-read failure has not recurred.
 
 The inherited runtime receives attributed shader and texture ports. Recent
 changes correct helper-lane reads, inactive-lane swizzles, DPP fetch-inactive
@@ -37,6 +37,9 @@ source-less/CMPX decoding fixes, pixel quad operations, cube-gradient mip
 selection and shader optimizer analysis reuse. Host graphics and mesh pipelines
 also disable blending on integer render targets, preserving color-target state.
 The blend-state regression tests pass under Proton-GE; GPU execution is unverified.
+DirectStorage partial batches wait for explicit submission so destination
+memory can be prepared before reads begin. `VICTORY_DSTORAGE_HALF=1` enables
+the earlier submission behavior for diagnostic comparisons.
 
 ## Layout
 

@@ -698,19 +698,12 @@ enum Command {
     Status(Status),
 }
 
-impl Command {
-    fn has_page_list(&self) -> bool {
-        matches!(self, Command::Read(r, _) if r.options & PAGE_DESTINATION != 0)
-    }
-}
-
 /// When a page destination's list is read (`VICTORY_PAGE_LIST`). The
 /// title passes a pointer into its live table of physical pages: it
 /// enqueues, then maps the pages (which fills the table in), then submits,
 /// and may change the table afterwards. So the list is right at the
 /// title's submit (`submit`, the default); `enqueue` reads it as the
-/// request comes in, `late` when a worker runs it (and lets a half-full
-/// queue submit on its own as before), to compare. Analysis by
+/// request comes in, `late` when a worker runs it, for comparison. Analysis by
 /// JappertjeV, PastiiJay/klbf-lab#3.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum PageList {
@@ -813,10 +806,12 @@ extern "system" fn enqueue_status(this: QueueRef, array: Array, index: u32) {
     queue(this, Command::Status(Status { array, index }));
 }
 
-/// Adds a command to the queue; blocks while the queue is full, and
-/// submits on its own once half of it is enqueued, as the console does,
-/// unless page-destination requests wait in it (their lists are only right
-/// at the title's submit): then only a full queue submits on its own.
+fn half_submits() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_DSTORAGE_HALF").is_some_and(|v| v == "1"))
+}
+
+/// Partial batches wait for the title to prepare destinations and submit.
 fn queue(this: QueueRef, command: Command) {
     // SAFETY: a queue we created and the title still holds.
     let id = unsafe { &*this }.state.id;
@@ -832,7 +827,7 @@ fn queue(this: QueueRef, command: Command) {
         if lane.entries() + 1 < lane.capacity.max(2) {
             break;
         }
-        if !lane.unsubmitted.is_empty() {
+        if !lane.unsubmitted.is_empty() && lane.reads.is_empty() && lane.running.is_empty() {
             tracing::warn!(
                 commands = lane.unsubmitted.len(),
                 "dstorage: a full queue submits before the title does"
@@ -850,8 +845,7 @@ fn queue(this: QueueRef, command: Command) {
         return;
     };
     lane.unsubmitted.push(command);
-    let hold = page_list() != PageList::Late && lane.unsubmitted.iter().any(Command::has_page_list);
-    if !hold && lane.unsubmitted.len() >= (lane.capacity / 2).max(1) {
+    if half_submits() && lane.unsubmitted.len() >= (lane.capacity / 2).max(1) {
         lanes.submit(id);
         scheduler.work.notify_all();
     }
@@ -1408,7 +1402,7 @@ mod tests {
     }
 
     #[test]
-    fn half_a_queue_submits_itself() {
+    fn half_a_queue_waits_for_explicit_submit() {
         let (_dir, file) = file_with(&pattern(64));
         let create: extern "system" fn(*mut c_void, *const QueueDesc, *const Guid, Out) -> HRESULT =
             call(factory(), 0x50);
@@ -1424,9 +1418,48 @@ mod tests {
         let array = status_array(1);
         let mut out = [0u8; 16];
         enqueue(queue, &request(0, out.as_mut_ptr().cast(), 16, file, 8, 16));
-        enqueue_status(queue, array, 0); // the second of four: no submit needed
-        assert_eq!(wait(array, 0), S_OK);
+        enqueue_status(queue, array, 0);
+        // SAFETY: the queue is our live synthetic object.
+        let id = unsafe { &*queue.cast::<Instance<Queue>>() }.state.id;
+        let unsubmitted = scheduler().unwrap().lock().lanes[&id].unsubmitted.len();
+        let pending = result(array, 0);
+        void(queue, 0x30);
+        let completed = wait(array, 0);
+        void(queue, 0x40);
+        assert_eq!(unsubmitted, 2);
+        assert_eq!(pending, E_PENDING);
+        assert_eq!(completed, S_OK);
         assert_eq!(out, pattern(64)[8..24]);
+    }
+
+    #[test]
+    fn a_full_queue_submits_itself() {
+        let (_dir, file) = file_with(&pattern(64));
+        let create: extern "system" fn(*mut c_void, *const QueueDesc, *const Guid, Out) -> HRESULT =
+            call(factory(), 0x50);
+        let desc = QueueDesc {
+            source_type: 0,
+            capacity: 4,
+            priority: 1,
+            name: c"small".as_ptr(),
+            unknown: 1,
+        };
+        let mut queue = std::ptr::null_mut();
+        assert_eq!(create(factory(), &desc, std::ptr::null(), &mut queue), S_OK);
+        let array = status_array(1);
+        let mut outs = [[0u8; 16]; 4];
+        for out in &mut outs[..2] {
+            enqueue(queue, &request(0, out.as_mut_ptr().cast(), 16, file, 8, 16));
+        }
+        enqueue_status(queue, array, 0);
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(result(array, 0), E_PENDING, "three of four: not submitted");
+        for out in &mut outs[2..] {
+            enqueue(queue, &request(0, out.as_mut_ptr().cast(), 16, file, 8, 16));
+        }
+        assert_eq!(wait(array, 0), S_OK);
+        void(queue, 0x40);
+        assert!(outs[..2].iter().all(|out| out[..] == pattern(64)[8..24]));
     }
 
     /// Lanes without workers: what `start` picks, and when statuses land.

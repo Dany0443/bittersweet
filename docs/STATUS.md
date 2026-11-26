@@ -14,7 +14,7 @@ should research current upstream sources when a task depends on them.
 | Host plan | `bittersweet plan` writes cache paths, VRAM budget, wave policy, vendor flags |
 | Setup | `setup.sh` prepares Proton-GE, prefix and `vm.max_map_count`; idempotent |
 | Windows runtime | Windows-target release cross-builds on Linux; account/player prompt rendered under GE-Proton11-12 |
-| First mission | Not verified; startup failed after compressed source reads encountered zero-filled data |
+| First mission | Not verified; current source checks pass and startup renders the publisher logo |
 
 Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
 Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
@@ -25,9 +25,10 @@ These observations do not establish mission compatibility or world frame times.
 ## What is missing
 
 1. **Mission-level execution evidence.** Proton reaches the account/player
-   prompt. The next local attempt failed after two compressed reads found
-   zero-filled source data. Independent reads and decompression reproduced
-   the invalid data. No game files were modified or added to the repository.
+   prompt and publisher logo. The current copy passes the two source-range
+   decompression checks that failed on the earlier copy. DirectStorage now
+   waits for explicit submission of partial batches; all 16 Windows-target
+   storage tests pass under Proton. Mission loading remains unverified.
 2. **Wine memory semantics.** Title memory is not always mapped in place
    under Wine. Upstream builds copy it, and one class of copies must not be
    sparse buffers or the GPU resets when the world loads.
@@ -89,7 +90,7 @@ Remaining ports need focused regressions and runtime evidence.
 
 ## Next milestones
 
-1. Resume mission loading with valid user-supplied source data.
+1. Continue mission-loading validation against the current user-supplied files.
 2. Fix observed shader, storage and GPU failures with focused regressions.
 3. Verify mission rendering, input and memory use under Proton.
 4. Validate cache behavior and longer sessions after mission startup works.

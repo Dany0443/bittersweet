@@ -160,3 +160,8 @@ Cube samples with explicit face gradients use the base-2 footprint LOD and
 apply the instruction's minimum LOD before `SampleLevel`. Synthetic cube
 mip fixtures compile on Linux; numerical D3D12 readback tests are included
 for Windows, but have not been run here.
+
+DirectStorage partial batches remain queued until the title submits them,
+after preparing destination memory. A full queue forces submission only
+when no previously submitted reads can make room. The diagnostic override
+`VICTORY_DSTORAGE_HALF=1` restores early submission for comparison.

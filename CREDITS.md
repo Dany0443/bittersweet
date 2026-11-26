@@ -165,3 +165,11 @@ accesses, atomic functions and explicit root signature. This tree keeps
 its existing per-record work budget and split-dispatch behavior. Synthetic
 GPU readback under Proton verifies record preservation, split output and
 budget accounting.
+
+DirectStorage partial batches now wait for the title's explicit submit,
+following `codec-d/cool_fox` from the source archive identified above.
+A full queue still submits when no queued or running reads can make room;
+`VICTORY_DSTORAGE_HALF=1` retains the earlier behavior for comparison.
+Synthetic tests cover both partial-batch ordering and full-queue progress.
+Source file `crates/victory-hle/src/modules/dstorage.rs` SHA-256:
+`ba5ca8e567b72c74f4c0aef5941541188deed762fd650eb67b92b763f3f09222`.
