@@ -259,3 +259,10 @@ handle if a worker handle cannot be reopened.
 The `VICTORY_DSTORAGE_WORKERS` override follows LoverCatys/ruff-lab commit
 `bffe04b`. It lets users limit concurrent storage reads on rotational drives;
 unset or invalid values preserve the existing logical-processor default.
+
+## RAM pressure cache cleanup
+
+System-memory caches now become eligible for cleanup sooner when available RAM
+falls below 5 GiB and 3 GiB, following LoverCatys/ruff-lab commit `3f43861`.
+This changes the existing idle timeouts from 10/5/2 seconds to 8/3.5/1.5
+seconds, respectively.

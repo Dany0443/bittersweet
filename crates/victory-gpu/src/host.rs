@@ -147,18 +147,18 @@ pub(crate) fn vram_idle_ms(video_memory: Option<[u64; 4]>) -> u64 {
 
 /// Effective idle timeout (in milliseconds) for system-RAM caches (staging
 /// buffers, loose shadows, and the mapped pipeline library), scaled down
-/// when free physical RAM is low. Never returns less than 2,000 ms.
+/// earlier on 16 GB PCs so free physical RAM stays clear of HDD paging.
 pub(crate) fn ram_idle_ms(avail_phys: Option<u64>) -> u64 {
     const GIB: u64 = 1024 * 1024 * 1024;
-    const NORMAL_MS: u64 = 10_000;
-    const MODERATE_MS: u64 = 5_000;
-    const HIGH_MS: u64 = 2_000;
+    const NORMAL_MS: u64 = 8_000;
+    const MODERATE_MS: u64 = 3_500;
+    const HIGH_MS: u64 = 1_500;
     let Some(avail) = avail_phys else {
         return NORMAL_MS;
     };
-    if avail < 2 * GIB {
+    if avail < 3 * GIB {
         HIGH_MS
-    } else if avail < 4 * GIB {
+    } else if avail < 5 * GIB {
         MODERATE_MS
     } else {
         NORMAL_MS
@@ -7366,16 +7366,16 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
     fn ram_idle_ms_scales_with_pressure() {
         use super::ram_idle_ms;
         let gib = 1024 * 1024 * 1024;
-        // Normal (>= 4 GiB)
-        assert_eq!(ram_idle_ms(Some(8 * gib)), 10_000);
-        assert_eq!(ram_idle_ms(Some(4 * gib)), 10_000);
-        // Moderate (2 GiB..4 GiB)
-        assert_eq!(ram_idle_ms(Some(4 * gib - 1)), 5_000);
-        assert_eq!(ram_idle_ms(Some(2 * gib)), 5_000);
-        // High (< 2 GiB)
-        assert_eq!(ram_idle_ms(Some(2 * gib - 1)), 2_000);
-        assert_eq!(ram_idle_ms(Some(0)), 2_000);
+        // Normal (>= 5 GiB)
+        assert_eq!(ram_idle_ms(Some(8 * gib)), 8_000);
+        assert_eq!(ram_idle_ms(Some(5 * gib)), 8_000);
+        // Moderate (3 GiB..5 GiB)
+        assert_eq!(ram_idle_ms(Some(5 * gib - 1)), 3_500);
+        assert_eq!(ram_idle_ms(Some(3 * gib)), 3_500);
+        // High (< 3 GiB)
+        assert_eq!(ram_idle_ms(Some(3 * gib - 1)), 1_500);
+        assert_eq!(ram_idle_ms(Some(0)), 1_500);
         // Missing falls back to normal
-        assert_eq!(ram_idle_ms(None), 10_000);
+        assert_eq!(ram_idle_ms(None), 8_000);
     }
 }
