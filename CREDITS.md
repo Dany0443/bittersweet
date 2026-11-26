@@ -244,3 +244,12 @@ The memory-import probe applies that same Wine helper technique: explicit
 UAV root serialization and structured-buffer accesses. Synthetic hardware
 readback verifies that its shader writes reach the CPU-visible buffer.
 This repairs the probe and does not itself establish title-memory imports.
+
+
+## DirectStorage worker file handles
+
+DirectStorage file reads now use a separate read handle per worker, following
+`codec-d/cool_fox` commit `fbc183085801939cac7b469eb0ce5956d8e0377f`.
+`VICTORY_DSTORAGE_IO=one` restores shared-handle reads for comparison. The
+port keeps the existing seek-based read path and falls back to the original
+handle if a worker handle cannot be reopened.

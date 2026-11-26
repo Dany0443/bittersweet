@@ -22,14 +22,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
 use std::os::windows::fs::FileExt;
 use std::os::windows::io::FromRawHandle;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
 
 use victory_formats::bcpack::{self, Tables};
 
 use super::xasync::{E_INVALIDARG, E_NOTIMPL, E_PENDING};
-use super::xmem::PageRuns;
 use super::xgameruntime::{Guid, HRESULT, Methods, Object, S_OK, add_ref, missing, put};
+use super::xmem::PageRuns;
 use crate::{HleModule, hle_export};
 
 /// The factory interface the title asks for.
@@ -145,7 +145,10 @@ extern "system" fn open_file(_: Factory, path: *const u16, iid: *const Guid, out
     tracing::info!(path = name, iid = iid_text(iid), "dstorage: file opened");
     // SAFETY: a handle we just opened and nobody else owns.
     let file = unsafe { std::fs::File::from_raw_handle(handle) };
-    let file = Instance::create(Object::new("dstorage file", &FILE_VTABLE), File { file });
+    let file = Instance::create(
+        Object::new("dstorage file", &FILE_VTABLE),
+        File::new(file, name, Io::chosen()),
+    );
     put(out, file)
 }
 
@@ -258,7 +261,98 @@ static FACTORY_VTABLE: Methods<16> = Methods([
 // Files.
 
 struct File {
+    files: Files,
+    path: String,
+}
+
+struct Files {
     file: std::fs::File,
+    worker_handles: Box<[OnceLock<Option<std::fs::File>>]>,
+    io: Io,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Io {
+    Shared,
+    PerWorker,
+}
+
+impl Io {
+    fn chosen() -> Io {
+        static CHOSEN: OnceLock<Io> = OnceLock::new();
+        *CHOSEN.get_or_init(|| {
+            let mode = match std::env::var("VICTORY_DSTORAGE_IO")
+                .as_deref()
+                .map(str::trim)
+            {
+                Ok("one") | Ok("shared") => Io::Shared,
+                _ => Io::PerWorker,
+            };
+            tracing::info!(?mode, "dstorage: file handle mode (VICTORY_DSTORAGE_IO)");
+            mode
+        })
+    }
+}
+
+impl File {
+    fn new(file: std::fs::File, path: String, io: Io) -> File {
+        File {
+            files: Files::new(file, io),
+            path,
+        }
+    }
+}
+
+impl Files {
+    fn new(file: std::fs::File, io: Io) -> Files {
+        let count = if io == Io::PerWorker {
+            std::thread::available_parallelism().map_or(4, |n| n.get())
+        } else {
+            0
+        };
+        Files {
+            file,
+            worker_handles: (0..count).map(|_| OnceLock::new()).collect(),
+            io,
+        }
+    }
+
+    fn read_at(&self, out: &mut [u8], offset: u64) -> std::io::Result<usize> {
+        let file = if self.io == Io::PerWorker {
+            let index = this_thread() % self.worker_handles.len();
+            self.worker_handles[index]
+                .get_or_init(|| reopen(&self.file))
+                .as_ref()
+                .unwrap_or(&self.file)
+        } else {
+            &self.file
+        };
+        file.seek_read(out, offset)
+    }
+}
+
+/// A stable slot for each worker thread so concurrent file reads use distinct
+/// handles. The original handle remains the fallback if reopening fails.
+fn this_thread() -> usize {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    thread_local! {
+        static NUMBER: usize = NEXT.fetch_add(1, Ordering::Relaxed);
+    }
+    NUMBER.with(|number| *number)
+}
+
+fn reopen(file: &std::fs::File) -> Option<std::fs::File> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, ReOpenFile};
+    // SAFETY: `file` remains open while the new read handle is made.
+    let handle = unsafe { ReOpenFile(file.as_raw_handle(), GENERIC_READ, FILE_SHARE_READ, 0) };
+    if handle == INVALID_HANDLE_VALUE {
+        tracing::warn!(error = %std::io::Error::last_os_error(), "dstorage: could not reopen a file for a worker");
+        return None;
+    }
+    // SAFETY: this is a newly opened handle owned by this file object.
+    Some(unsafe { std::fs::File::from_raw_handle(handle) })
 }
 
 static FILE_VTABLE: Methods<8> = Methods([
@@ -448,7 +542,10 @@ fn work(scheduler: &'static Scheduler) {
     let mut lanes = scheduler.lock();
     loop {
         let Some(job) = lanes.start() else {
-            lanes = scheduler.work.wait(lanes).unwrap_or_else(|e| e.into_inner());
+            lanes = scheduler
+                .work
+                .wait(lanes)
+                .unwrap_or_else(|e| e.into_inner());
             continue;
         };
         drop(lanes);
@@ -487,7 +584,8 @@ impl Lanes {
                 reading_workers = format_args!("{:.2}", reading / elapsed.as_secs_f64()),
                 staging_waits = std::mem::take(&mut self.refused),
                 bcpack_mb = self.bcpack.0 / 1_000_000,
-                bcpack_workers = format_args!("{:.2}", self.bcpack.1.as_secs_f64() / elapsed.as_secs_f64()),
+                bcpack_workers =
+                    format_args!("{:.2}", self.bcpack.1.as_secs_f64() / elapsed.as_secs_f64()),
                 waiting,
                 "dstorage: last {:.1} s",
                 elapsed.as_secs_f64()
@@ -604,7 +702,11 @@ impl Lane {
     fn flush(&mut self) {
         while let Some(&(seq, _)) = self.statuses.front() {
             let waiting = self.reads.front().map(|r| r.0);
-            if waiting.into_iter().chain(self.running.first().copied()).any(|s| s < seq) {
+            if waiting
+                .into_iter()
+                .chain(self.running.first().copied())
+                .any(|s| s < seq)
+            {
                 return;
             }
             let Some((_, status)) = self.statuses.pop_front() else {
@@ -734,7 +836,10 @@ fn resolve(request: &Request, at: &str) -> Option<PageRuns> {
     let (offset, len) = destination_span(request);
     // SAFETY: the title passes a page number per 64 KiB of destination.
     let pages = unsafe {
-        std::slice::from_raw_parts(request.destination.cast::<usize>(), (offset + len).div_ceil(PAGE))
+        std::slice::from_raw_parts(
+            request.destination.cast::<usize>(),
+            (offset + len).div_ceil(PAGE),
+        )
     };
     let runs = super::xmem::resolve_pages(pages, offset, len);
     if runs.is_none() {
@@ -758,7 +863,6 @@ fn destination_span(request: &Request) -> (usize, usize) {
     };
     ((request.page_offset & 0xffff) as usize, len as usize)
 }
-
 
 /// A status entry to write, holding a reference on its array.
 struct Status {
@@ -875,9 +979,21 @@ extern "system" fn close(this: QueueRef) {
 /// Reads, inflates and/or unpacks, and writes one request.
 fn execute(request: &Request, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
     let options = request.options;
+    let source_path = || {
+        if options & MEMORY_SOURCE != 0 || request.source.is_null() {
+            return "<memory>";
+        }
+        // SAFETY: file requests hold a DirectStorage file object until their
+        // completion status is written.
+        unsafe { &*request.source.cast::<Instance<File>>() }
+            .state
+            .path
+            .as_str()
+    };
     let fail = |hr: HRESULT, why: &str| {
         tracing::warn!(
             options = format_args!("{options:#x}"),
+            source = source_path(),
             offset = request.offset,
             source_size = request.source_size,
             destination_size = request.destination_size,
@@ -902,10 +1018,16 @@ fn execute(request: &Request, pages: Option<&PageRuns>) -> Result<(), HRESULT> {
             return Err(fail(E_INVALIDARG, "source larger than destination"));
         }
         let size = request.source_size as usize;
-        return into_destination(request, pages, size, |out| read_into(request, out).map(|()| size))
-            .map_err(|hr| fail(hr, "copying"));
+        return into_destination(request, pages, size, |out| {
+            read_into(request, out).map(|()| size)
+        })
+        .map_err(|hr| fail(hr, "copying"));
     }
-    let tables = if bc != 0 { Some(bcpack_tables()?) } else { None };
+    let tables = if bc != 0 {
+        Some(bcpack_tables()?)
+    } else {
+        None
+    };
     let source = read_source(request).map_err(|hr| fail(hr, "reading the source"))?;
     // The console's order: zlib first, then BCPack.
     let source = if bc != 0 && options & ZLIB != 0 {
@@ -971,7 +1093,14 @@ fn inflate(source: &[u8], out: &mut [u8]) -> Result<usize, HRESULT> {
         match status {
             Ok(zlib_rs::Status::StreamEnd) if written <= out_len => Ok(written),
             other => {
-                tracing::debug!(?other, "dstorage: zlib stream");
+                tracing::warn!(
+                    ?other,
+                    source_bytes = source.len(),
+                    destination_bytes = out_len,
+                    consumed = state.total_in(),
+                    produced = written,
+                    "dstorage: zlib stream rejected"
+                );
                 Err(INVALID_DATA)
             }
         }
@@ -1013,7 +1142,9 @@ fn use_bcpack_tables(dir: std::path::PathBuf) {
 
 #[cfg(test)]
 fn load_bcpack_tables() -> Result<Tables, String> {
-    let dir = BCPACK_DIR.get().ok_or("no folder set for the test tables")?;
+    let dir = BCPACK_DIR
+        .get()
+        .ok_or("no folder set for the test tables")?;
     let bytes = std::fs::read(dir.join("tables.bin")).map_err(|e| e.to_string())?;
     Tables::parse(&bytes).map_err(|e| e.to_string())
 }
@@ -1039,20 +1170,22 @@ static READING: AtomicU64 = AtomicU64::new(0);
 fn read_into(request: &Request, out: &mut [u8]) -> Result<(), HRESULT> {
     if request.options & MEMORY_SOURCE != 0 {
         // SAFETY: the title's source holds `out.len()` bytes until completion.
-        out.copy_from_slice(unsafe { std::slice::from_raw_parts(request.source.cast(), out.len()) });
+        out.copy_from_slice(unsafe {
+            std::slice::from_raw_parts(request.source.cast(), out.len())
+        });
         return Ok(());
     }
     // SAFETY: a file object we created; the title keeps it open.
     let file = &unsafe { &*request.source.cast::<Instance<File>>() }
         .state
-        .file;
+        .files;
     let started = std::time::Instant::now();
     let mut done = 0;
     let result = loop {
         if done == out.len() {
             break Ok(());
         }
-        match file.seek_read(&mut out[done..], request.offset + done as u64) {
+        match file.read_at(&mut out[done..], request.offset + done as u64) {
             Ok(0) => break Err(END_OF_FILE),
             Ok(n) => done += n,
             Err(error) => break Err(from_win32(&error)),
@@ -1113,24 +1246,38 @@ fn into_destination(
     // about 1.5 s in all).
     static RETRIES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     let retries = *RETRIES.get_or_init(|| {
-        std::env::var("VICTORY_DSTORAGE_RETRIES").ok().and_then(|v| v.parse().ok()).unwrap_or(12)
+        std::env::var("VICTORY_DSTORAGE_RETRIES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(12)
     });
     let write = || runs.is_some_and(|runs| runs.write(&data[..n]));
     let mut written = write();
     let mut tries = 0;
     while !written && runs.is_some() && tries < retries {
-        std::thread::sleep(std::time::Duration::from_millis((2u64 << tries.min(6)).min(128)));
+        std::thread::sleep(std::time::Duration::from_millis(
+            (2u64 << tries.min(6)).min(128),
+        ));
         tries += 1;
         written = write();
     }
     if written {
         if tries > 0 {
-            tracing::info!(offset, len, tries, "dstorage: a destination's physical pages written after a retry");
+            tracing::info!(
+                offset,
+                len,
+                tries,
+                "dstorage: a destination's physical pages written after a retry"
+            );
         }
         Ok(())
     } else {
         let known = runs.is_some();
-        tracing::warn!(known, last_error = std::io::Error::last_os_error().raw_os_error(), "dstorage: retries used up");
+        tracing::warn!(
+            known,
+            last_error = std::io::Error::last_os_error().raw_os_error(),
+            "dstorage: retries used up"
+        );
         // Said aloud: the title never reads a request's result
         // (it only polls for completion), so a destination left unwritten
         // is a model or texture that silently holds whatever its pages
@@ -1298,6 +1445,40 @@ mod tests {
     }
 
     #[test]
+    fn per_worker_file_handles_read_independent_offsets() {
+        let expected = pattern(1_000_000);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("worker-reads.bin");
+        std::fs::write(&path, &expected).unwrap();
+        let file = std::sync::Arc::new(Files::new(
+            std::fs::File::open(path).unwrap(),
+            Io::PerWorker,
+        ));
+
+        let workers = 12;
+        std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..workers)
+                .map(|worker| {
+                    let file = file.clone();
+                    let expected = &expected;
+                    scope.spawn(move || {
+                        for iteration in 0..50 {
+                            let offset = (worker * 7919 + iteration * 104729) % 900_000;
+                            let mut actual = [0; 512];
+                            let read = file.read_at(&mut actual, offset as u64).unwrap();
+                            assert_eq!(read, actual.len());
+                            assert_eq!(&actual, &expected[offset..offset + actual.len()]);
+                        }
+                    })
+                })
+                .collect();
+            for thread in threads {
+                thread.join().unwrap();
+            }
+        });
+    }
+
+    #[test]
     fn request_layout_is_the_titles() {
         assert_eq!(size_of::<Request>(), 0x48);
         assert_eq!(std::mem::offset_of!(Request, destination_size), 0x18);
@@ -1309,8 +1490,7 @@ mod tests {
 
     fn compress_zlib(plain: &[u8]) -> Vec<u8> {
         let mut buf = vec![0u8; zlib_rs::compress_bound(plain.len())];
-        let (packed, rc) =
-            zlib_rs::compress_slice(&mut buf, plain, zlib_rs::DeflateConfig::new(6));
+        let (packed, rc) = zlib_rs::compress_slice(&mut buf, plain, zlib_rs::DeflateConfig::new(6));
         assert_eq!(rc, zlib_rs::ReturnCode::Ok);
         packed.to_vec()
     }
@@ -1377,7 +1557,8 @@ mod tests {
         // Requests in flight together run in any order, so none of them
         // shares a destination (failed ones leave theirs undefined).
         let mut buffers = [[0u8; 16]; 5];
-        let [failed, failed_too, out, other, bcpack] = buffers.each_mut().map(|b| b.as_mut_ptr().cast());
+        let [failed, failed_too, out, other, bcpack] =
+            buffers.each_mut().map(|b| b.as_mut_ptr().cast());
 
         // Segment 0: a read past the end, then a bad stream; the first wins.
         enqueue(queue, &request(0, failed, 16, file, 4090, 16));
@@ -1632,7 +1813,10 @@ mod tests {
         let (_dir, file) = file_with(&contents);
         let (queue, array) = (new_queue(0), status_array(1));
         let mut out = [0u8; 16];
-        enqueue(queue, &request(4 << 1, out.as_mut_ptr().cast(), 16, file, 100, 88));
+        enqueue(
+            queue,
+            &request(4 << 1, out.as_mut_ptr().cast(), 16, file, 100, 88),
+        );
         enqueue_status(queue, array, 0);
         void(queue, 0x30);
         assert_eq!(wait(array, 0), S_OK);
