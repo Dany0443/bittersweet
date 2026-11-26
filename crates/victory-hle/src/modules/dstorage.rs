@@ -517,7 +517,11 @@ fn scheduler() -> Option<&'static Scheduler> {
         })
         .as_ref()?;
     STARTED.call_once(|| {
-        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let workers = dstorage_workers(
+            std::env::var("VICTORY_DSTORAGE_WORKERS").ok().as_deref(),
+            cpus,
+        );
         let started = (0..workers)
             .filter(|i| {
                 std::thread::Builder::new()
@@ -529,6 +533,16 @@ fn scheduler() -> Option<&'static Scheduler> {
         tracing::info!(workers = started, "dstorage: workers");
     });
     Some(scheduler)
+}
+
+/// Number of DirectStorage workers (`VICTORY_DSTORAGE_WORKERS`, clamped to
+/// 1..=64), or the logical processor count when unset or invalid. A small
+/// value reduces seek contention on rotational drives.
+fn dstorage_workers(env: Option<&str>, cpus: usize) -> usize {
+    env.and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|&count| count > 0)
+        .unwrap_or(cpus)
+        .clamp(1, 64)
 }
 
 impl Scheduler {
@@ -1442,6 +1456,16 @@ mod tests {
 
     fn pattern(n: usize) -> Vec<u8> {
         (0..n).map(|i| (i * 7 + i / 251) as u8).collect()
+    }
+
+    #[test]
+    fn dstorage_worker_limit_uses_cpu_default_and_clamps_overrides() {
+        assert_eq!(dstorage_workers(None, 12), 12);
+        assert_eq!(dstorage_workers(Some(" 3 "), 12), 3);
+        assert_eq!(dstorage_workers(Some("0"), 12), 12);
+        assert_eq!(dstorage_workers(Some("bad"), 12), 12);
+        assert_eq!(dstorage_workers(Some("128"), 12), 64);
+        assert_eq!(dstorage_workers(Some("2"), 0), 1);
     }
 
     #[test]

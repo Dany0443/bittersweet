@@ -253,3 +253,9 @@ DirectStorage file reads now use a separate read handle per worker, following
 `VICTORY_DSTORAGE_IO=one` restores shared-handle reads for comparison. The
 port keeps the existing seek-based read path and falls back to the original
 handle if a worker handle cannot be reopened.
+
+## DirectStorage worker limit
+
+The `VICTORY_DSTORAGE_WORKERS` override follows LoverCatys/ruff-lab commit
+`bffe04b`. It lets users limit concurrent storage reads on rotational drives;
+unset or invalid values preserve the existing logical-processor default.
