@@ -254,6 +254,12 @@ DirectStorage file reads now use a separate read handle per worker, following
 port keeps the existing seek-based read path and falls back to the original
 handle if a worker handle cannot be reopened.
 
+Optional `overlapped` and `direct` read modes adapt the corresponding paths
+from the `codec-d/cool_fox` snapshot identified above. They use explicit
+Windows overlapped reads, with sector-aligned buffering for direct I/O. The
+high-offset synthetic read test passes under Proton; these modes did not
+change the invalid stream observed in the current RX 5700 runtime.
+
 ## DirectStorage worker limit
 
 The `VICTORY_DSTORAGE_WORKERS` override follows LoverCatys/ruff-lab commit

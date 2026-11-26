@@ -275,6 +275,8 @@ struct Files {
 enum Io {
     Shared,
     PerWorker,
+    Overlapped,
+    Direct,
 }
 
 impl Io {
@@ -286,6 +288,8 @@ impl Io {
                 .map(str::trim)
             {
                 Ok("one") | Ok("shared") => Io::Shared,
+                Ok("overlapped") => Io::Overlapped,
+                Ok("direct") => Io::Direct,
                 _ => Io::PerWorker,
             };
             tracing::info!(?mode, "dstorage: file handle mode (VICTORY_DSTORAGE_IO)");
@@ -307,6 +311,10 @@ impl Files {
     fn new(file: std::fs::File, io: Io) -> Files {
         let count = if io == Io::PerWorker {
             std::thread::available_parallelism().map_or(4, |n| n.get())
+        } else if io == Io::Direct {
+            std::thread::available_parallelism().map_or(4, |n| n.get())
+        } else if io == Io::Overlapped {
+            1
         } else {
             0
         };
@@ -318,16 +326,39 @@ impl Files {
     }
 
     fn read_at(&self, out: &mut [u8], offset: u64) -> std::io::Result<usize> {
-        let file = if self.io == Io::PerWorker {
-            let index = this_thread() % self.worker_handles.len();
-            self.worker_handles[index]
-                .get_or_init(|| reopen(&self.file))
-                .as_ref()
-                .unwrap_or(&self.file)
-        } else {
-            &self.file
-        };
-        file.seek_read(out, offset)
+        match self.io {
+            Io::Shared => self.file.seek_read(out, offset),
+            Io::PerWorker => {
+                let index = this_thread() % self.worker_handles.len();
+                self.worker_handles[index]
+                    .get_or_init(|| reopen(&self.file, 0))
+                    .as_ref()
+                    .unwrap_or(&self.file)
+                    .seek_read(out, offset)
+            }
+            Io::Overlapped => {
+                use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED;
+                let file =
+                    self.worker_handles[0].get_or_init(|| reopen(&self.file, FILE_FLAG_OVERLAPPED));
+                match file.as_ref() {
+                    Some(file) => read_overlapped(file, out, offset),
+                    None => self.file.seek_read(out, offset),
+                }
+            }
+            Io::Direct => {
+                use windows_sys::Win32::Storage::FileSystem::{
+                    FILE_FLAG_NO_BUFFERING, FILE_FLAG_OVERLAPPED,
+                };
+                let index = this_thread() % self.worker_handles.len();
+                let file = self.worker_handles[index].get_or_init(|| {
+                    reopen(&self.file, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING)
+                });
+                match file.as_ref() {
+                    Some(file) => read_direct(file, out, offset),
+                    None => self.file.seek_read(out, offset),
+                }
+            }
+        }
     }
 }
 
@@ -341,18 +372,104 @@ fn this_thread() -> usize {
     NUMBER.with(|number| *number)
 }
 
-fn reopen(file: &std::fs::File) -> Option<std::fs::File> {
+fn reopen(file: &std::fs::File, flags: u32) -> Option<std::fs::File> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, ReOpenFile};
     // SAFETY: `file` remains open while the new read handle is made.
-    let handle = unsafe { ReOpenFile(file.as_raw_handle(), GENERIC_READ, FILE_SHARE_READ, 0) };
+    let handle = unsafe { ReOpenFile(file.as_raw_handle(), GENERIC_READ, FILE_SHARE_READ, flags) };
     if handle == INVALID_HANDLE_VALUE {
         tracing::warn!(error = %std::io::Error::last_os_error(), "dstorage: could not reopen a file for a worker");
         return None;
     }
     // SAFETY: this is a newly opened handle owned by this file object.
     Some(unsafe { std::fs::File::from_raw_handle(handle) })
+}
+
+/// Reads at an explicit offset through a handle opened for overlapped reads.
+fn read_overlapped(file: &std::fs::File, out: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_HANDLE_EOF, ERROR_IO_PENDING, HANDLE};
+    use windows_sys::Win32::Storage::FileSystem::ReadFile;
+    use windows_sys::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
+    use windows_sys::Win32::System::Threading::CreateEventW;
+
+    struct Event(HANDLE);
+
+    impl Drop for Event {
+        fn drop(&mut self) {
+            // SAFETY: this event is created by this thread and owned here.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    thread_local! {
+        static DONE: Event =
+            // SAFETY: creates a manual-reset event used by this thread's I/O.
+            Event(unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) });
+    }
+
+    DONE.with(|done| {
+        if done.0.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut overlapped = OVERLAPPED {
+            hEvent: done.0,
+            ..Default::default()
+        };
+        overlapped.Anonymous.Anonymous.Offset = offset as u32;
+        overlapped.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
+        let len = out.len().min(1 << 30) as u32;
+        let mut count = 0;
+        // SAFETY: the output and OVERLAPPED stay alive until the operation
+        // completes, because pending reads are waited for below.
+        let mut read = unsafe {
+            ReadFile(
+                file.as_raw_handle(),
+                out.as_mut_ptr(),
+                len,
+                std::ptr::null_mut(),
+                &mut overlapped,
+            )
+        } != 0;
+        let mut error = std::io::Error::last_os_error();
+        if read || error.raw_os_error() == Some(ERROR_IO_PENDING as i32) {
+            // SAFETY: the operation and its OVERLAPPED are still alive.
+            read = unsafe { GetOverlappedResult(file.as_raw_handle(), &overlapped, &mut count, 1) }
+                != 0;
+            error = std::io::Error::last_os_error();
+        }
+        match error.raw_os_error() {
+            _ if read => Ok(count as usize),
+            Some(code) if code == ERROR_HANDLE_EOF as i32 => Ok(0),
+            _ => Err(error),
+        }
+    })
+}
+
+/// Reads sector-aligned blocks through an unbuffered handle, then copies the
+/// requested byte range into the caller's buffer.
+fn read_direct(file: &std::fs::File, out: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    const SECTOR: usize = 4096;
+    const MOST: usize = 1 << 20;
+    let sector = SECTOR as u64;
+    if offset % sector == 0 && out.len() % SECTOR == 0 && out.as_ptr() as usize % SECTOR == 0 {
+        return read_overlapped(file, out, offset);
+    }
+    thread_local! {
+        static BUFFER: std::cell::RefCell<Vec<u8>> =
+            std::cell::RefCell::new(vec![0; MOST + SECTOR]);
+    }
+    BUFFER.with_borrow_mut(|buffer| {
+        let align = buffer.as_ptr().align_offset(SECTOR);
+        let before = (offset % sector) as usize;
+        let len = (before + out.len()).next_multiple_of(SECTOR).min(MOST);
+        let aligned = &mut buffer[align..align + len];
+        let read = read_overlapped(file, aligned, offset - before as u64)?;
+        let count = read.saturating_sub(before).min(out.len());
+        out[..count].copy_from_slice(&aligned[before..before + count]);
+        Ok(count)
+    })
 }
 
 static FILE_VTABLE: Methods<8> = Methods([
@@ -1527,10 +1644,12 @@ mod tests {
         writer.write_all(marker).unwrap();
         drop(writer);
 
-        let files = Files::new(std::fs::File::open(path).unwrap(), Io::Shared);
-        let mut actual = vec![0; marker.len()];
-        assert_eq!(files.read_at(&mut actual, offset).unwrap(), marker.len());
-        assert_eq!(actual, marker);
+        for io in [Io::Shared, Io::Overlapped, Io::Direct] {
+            let files = Files::new(std::fs::File::open(&path).unwrap(), io);
+            let mut actual = vec![0; marker.len()];
+            assert_eq!(files.read_at(&mut actual, offset).unwrap(), marker.len());
+            assert_eq!(actual, marker, "{io:?}");
+        }
     }
 
     #[test]
