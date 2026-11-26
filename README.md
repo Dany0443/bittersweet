@@ -45,6 +45,8 @@ memory-constrained runs. Unset, the existing worker-count default applies.
 The GPU memory-comparison helper compiles under Wine and passes synthetic
 hardware readback tests under GE-Proton11-14. Mission execution remains
 unverified.
+Shader translation recognizes dimension-only reads of 2D texture and
+structured-buffer descriptors, with synthetic GPU readback coverage.
 
 ## Layout
 

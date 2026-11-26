@@ -186,3 +186,16 @@ adaptation preserves bittersweet's default of half the logical processors,
 bounded to 2 through 8 workers, and its larger Proton pipeline stack.
 Source file SHA-256:
 `e329581b29607a54a8e5a076b323ab31382e88ebcbe67ce85894c8cc2d93b3ca`.
+
+## Descriptor dimension queries
+
+Dimension-only descriptor reads follow `codec-d/cool_fox`, from the source
+archive identified above. The port recognizes 2D height extraction and
+structured-buffer count queries with a known stride. It excludes the
+source's fallback that assumes an unknown eight-dword view is 2D.
+Synthetic translation tests and hardware readback under GE-Proton11-14
+verify dimensions and record counts; ambiguous reads remain rejected.
+Source `crates/victory-shader/src/emit/lower.rs` SHA-256:
+`086faeb508aaf4d0a50d2bd3c8439402fbb212f51c26631fb10e4382afb16dfd`.
+Source synthetic tests `crates/victory-shader/src/emit/size_tests.rs` SHA-256:
+`feac08a488c9c782f2a1974b214ddf89c90a059662d54943667c89c6380de925`.
