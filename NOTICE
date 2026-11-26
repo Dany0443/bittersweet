@@ -40,3 +40,4 @@ and adaptation scope are recorded in CREDITS.md.
 
 Integer render-target blend handling is adapted from codec-d/cool_fox
 (GPL-3.0-or-later). Source archive provenance is recorded in CREDITS.md.
+Retail presentation-plane layout also follows the same cool_fox archive.

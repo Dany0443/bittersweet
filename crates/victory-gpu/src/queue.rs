@@ -585,9 +585,7 @@ extern "system" fn execute(this: This, count: u32, lists: *const This) {
     }
 }
 
-/// A present plane as the console lays it out: frame token, the plane's
-/// resources, their source rectangles and placements (optional), colour
-/// space and flags. 48 bytes, so a second plane starts at +0x30.
+/// A retail present plane, including all seven option words.
 #[repr(C)]
 pub(crate) struct Plane {
     token: u64,
@@ -597,8 +595,9 @@ pub(crate) struct Plane {
     placements: *const u8,
     colour_space: u32,
     flags: u32,
+    options: [u32; 6],
 }
-const _: () = assert!(size_of::<Plane>() == 0x30);
+const _: () = assert!(size_of::<Plane>() == 72);
 
 /// The one plane and resource shown, for debugging:
 /// `VICTORY_PRESENT_PLANE=P` or `P:R`. Unset: every plane's resources, in
@@ -1196,5 +1195,24 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         Written::GpuTimestamp.write(at[1..].as_mut_ptr().cast(), 8);
         assert!(at[1] > first);
+    }
+}
+
+#[cfg(test)]
+mod plane_layout_tests {
+    use super::Plane;
+
+    #[test]
+    fn present_planes_follow_the_retail_stride() {
+        assert_eq!(size_of::<Plane>(), 72);
+        let mut records = [0u64; 18];
+        records[0] = 11;
+        records[1] = 1;
+        records[9] = 22;
+        records[10] = 2;
+        // SAFETY: aligned synthetic records with valid integer and null pointer fields.
+        let planes = unsafe { std::slice::from_raw_parts(records.as_ptr().cast::<Plane>(), 2) };
+        assert_eq!((planes[0].token, planes[0].count), (11, 1));
+        assert_eq!((planes[1].token, planes[1].count), (22, 2));
     }
 }

@@ -146,3 +146,9 @@ contains no Git commit identity; its SHA-256 is
 `79f5bfe598730ddabfc01a1bc02a2fd5a70f80eb2642a6982321c232242838de`.
 The source file SHA-256 is
 `e81023c24ffbf003b2ef80419310a71c87c11b36df1fa387c6b23b3ade7e78f5`.
+
+Retail presentation-plane stride follows `cool_fox`'s `RetailPlane` in
+`crates/victory-gpu/src/queue.rs`, from the same archive. The adaptation
+retains this tree's rectangle and layer composition handling and adds the
+six missing option words. Source file SHA-256:
+`b1bd87c602264b182ba5edd33a3dc9840ec86a0e71329355fb8be3b3e24d9713`.
