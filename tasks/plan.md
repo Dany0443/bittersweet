@@ -32,4 +32,4 @@ README performance claims are leads, not local execution evidence.
 
 Keep private helpers, captures, caches and title files outside Git. Work on
 main with the configured maintainer identity and separate verified commits.
-Do not push without explicit authorization for the pending work.
+Push only when the user's existing clean-and-ready condition is met.

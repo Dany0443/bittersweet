@@ -15,6 +15,11 @@ results, including negative operands and wrapping. Verify portable lowering
 and Windows-target GPU readback. Dependencies: none. Scope: small, lower.rs
 and focused tests. Attribute the new cool_fox source identity.
 
+Completed: synthetic GPU readback reproduced the unsupported instruction
+before the port and passes afterward, including signed bytes and overflow.
+The portable shader suite and policy tests pass. Title effects remain to
+be measured after rebuilding.
+
 ## 3. Translate root constant buffers as raw bytes
 
 Acceptance: the opt-in path preserves constant values and root bindings;

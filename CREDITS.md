@@ -297,3 +297,14 @@ The optional `VICTORY_COMMIT_RESERVE_MB` setting also pauses new indexed
 texture copies and shortens idle-copy retention when Windows commit approaches
 the configured reserve. This follows `ruff-lab` commit `bffe04b` and its
 attribution to ka1qux/BRVIctory-ka1qux commit `8cac16489a`.
+
+## Updated cool_fox shader arithmetic
+
+Packed signed-byte dot accumulation follows `DoubleGhosty/cool_fox` main
+commit `c3e5c375bad6447bbd99057c828eb14925b0e503`. The supplied archive
+has SHA-256
+`9c2d6976f01b5abe0c4ad3723967f18adffc16a9ea991b73a3364e8734f4ad39`.
+The adaptation uses the existing integer lowering path and DXIL packed
+dot intrinsic. Synthetic GPU readback under GE-Proton11-14 verifies signed
+bytes, an existing accumulator and wrapping results. This does not yet
+establish complete upscaler support or a title frame-rate improvement.
