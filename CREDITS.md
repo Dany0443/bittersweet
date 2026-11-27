@@ -139,6 +139,8 @@ each crate's manifest. They are linked, not copied into this repository.
 
 All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 
+- Scalar min/max condition codes, [PR #139](https://github.com/DexNom/VIctory/pull/139), head `eeaa31ff38a9347af719bf8897ac91cfb3871828`: Set SCC when the first operand wins the comparison, including zero and signed operands. Synthetic GPU tests check both the selected value and SCC.
+
 - Uniform static-sampler selection, commit `ddb73326b09e600bd2405ee5c987fa611098aaa1`: Sample both constant bindings and select the texel using the original uniform branch edge. Preserve derivatives and retain unreachable-edge handling.
 
 - Restored wave64 mask recognition, commit `76749ce58da23a43a3500454a8b69c53f05aa477`: Trace both scalar-copy chains back to the same known mask in their original dword order. Reject a duplicated or replaced high dword.
