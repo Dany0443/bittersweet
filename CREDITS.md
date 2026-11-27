@@ -139,6 +139,8 @@ each crate's manifest. They are linked, not copied into this repository.
 
 All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 
+- Shared immutable texture-address tables, [PR #118](https://github.com/DexNom/VIctory/pull/118), head `a0cf6e6c6822f14a77d6e173eff2c4082e266d66`: Cache the standard 2D/3D addressing patterns by tile kind, element size and block size. Cloning layouts retains the same tables. The newer render-XOR layout path is not present here.
+
 - Scalar min/max condition codes, [PR #139](https://github.com/DexNom/VIctory/pull/139), head `eeaa31ff38a9347af719bf8897ac91cfb3871828`: Set SCC when the first operand wins the comparison, including zero and signed operands. Synthetic GPU tests check both the selected value and SCC.
 
 - Uniform static-sampler selection, commit `ddb73326b09e600bd2405ee5c987fa611098aaa1`: Sample both constant bindings and select the texel using the original uniform branch edge. Preserve derivatives and retain unreachable-edge handling.

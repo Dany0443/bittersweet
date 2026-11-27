@@ -30,6 +30,8 @@
 //! Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 //! EXPRESS OR IMPLIED.
 
+use std::sync::OnceLock;
+
 /// A swizzle mode, by its hardware number (addrlib's `ADDR_SW_*` order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Swizzle(pub u32);
@@ -157,6 +159,9 @@ pub struct Tail {
     pub y: u32,
 }
 
+type Pattern = [Vec<u32>; 3];
+static EMPTY_PATTERN: Pattern = [const { Vec::new() }; 3];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     pub desc: Desc,
@@ -176,7 +181,7 @@ pub struct Layout {
     pub mips: Vec<Mip>,
     /// Byte offsets inside a block of each element coordinate bit, per
     /// axis; empty for linear and unsupported modes.
-    pattern: [Vec<u32>; 3],
+    pattern: &'static Pattern,
 }
 
 /// Micro tile (256 bytes) patterns by log2 of the element size: for each
@@ -322,7 +327,7 @@ impl Layout {
             alignment: 256,
             first_tail_mip: d.mips,
             mips,
-            pattern: Default::default(),
+            pattern: &EMPTY_PATTERN,
         }
     }
 
@@ -490,9 +495,13 @@ impl Layout {
             } else {
                 usize::from(d.swizzle.display())
             };
-            pattern(kind, element_log2, block_log2).map(|bits| spread(&bits))
+            static PATTERNS: [OnceLock<Pattern>; 45] = [const { OnceLock::new() }; 45];
+            let index = (kind * 5 + element_log2 as usize) * 3 + ((block_log2 - 8) / 4) as usize;
+            PATTERNS[index].get_or_init(|| {
+                pattern(kind, element_log2, block_log2).map(|bits| spread(&bits))
+            })
         } else {
-            Default::default()
+            &EMPTY_PATTERN
         };
         Layout {
             desc: d,
@@ -949,6 +958,63 @@ mod tests {
         let l = Layout::new(&desc(64, 64, 1, 16, Swizzle::SW_64KB_D)).unwrap();
         assert_eq!(l.block, [64, 64, 1]);
         assert_eq!((l.size, l.alignment), (65536, 65536));
+    }
+
+    #[test]
+    fn texture_layouts_share_immutable_address_tables() {
+        for swizzle in [
+            Swizzle::SW_256B_S,
+            Swizzle::SW_256B_D,
+            Swizzle::SW_4KB_S,
+            Swizzle::SW_4KB_D,
+            Swizzle::SW_64KB_S,
+            Swizzle::SW_64KB_D,
+        ] {
+            for element_bytes in [1, 2, 4, 8, 16] {
+                for dimension in [Dimension::Tex2d, Dimension::Tex3d] {
+                    let d = Desc {
+                        dimension,
+                        ..desc(128, 64, 1, element_bytes, swizzle)
+                    };
+                    let Ok(original) = Layout::new(&d) else {
+                        continue;
+                    };
+                    std::thread::scope(|scope| {
+                        for _ in 0..4 {
+                            let original = &original;
+                            scope.spawn(move || {
+                                let layout = Layout::new(&d).unwrap();
+                                assert_eq!(layout, *original);
+                                for axis in 0..3 {
+                                    assert!(std::ptr::eq(
+                                        layout.pattern[axis].as_ptr(),
+                                        original.pattern[axis].as_ptr()
+                                    ));
+                                    assert!(std::ptr::eq(
+                                        layout.clone().pattern[axis].as_ptr(),
+                                        original.pattern[axis].as_ptr()
+                                    ));
+                                }
+                            });
+                        }
+                    });
+                    let kind = if dimension == Dimension::Tex3d {
+                        2
+                    } else {
+                        usize::from(swizzle.display())
+                    };
+                    let expected = pattern(
+                        kind,
+                        element_bytes.trailing_zeros(),
+                        swizzle.block_log2().unwrap(),
+                    )
+                    .map(|bits| spread(&bits));
+                    assert_eq!(original.pattern[0], expected[0]);
+                    assert_eq!(original.pattern[1], expected[1]);
+                    assert_eq!(original.pattern[2], expected[2]);
+                }
+            }
+        }
     }
 
     /// Every element of every mip and slice lands on its own address, inside
