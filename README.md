@@ -29,8 +29,9 @@ numbers do not mean the GPU can simply be turned up to reach 20 to 30 fps.
 Some measurements used a private Wine mapping optimization, so stock Proton
 may perform differently.
 
-**RX 5700:** tested on another PC with similar reported results. Separate
-FPS, memory measurements and complete system specifications are unavailable.
+| GPU | Architecture | Observed Behavior | Known Issues |
+|---|---|---|---|
+| Radeon RX 5700 | RDNA 1 (gfx10.1) | Boots to the main and settings menus and completes initial loading screens on a secondary test system. | 3D world rendering beyond the loading screen is unverified (no hardware mesh shader support). Full system specs, driver and Proton version pending. |
 
 ## Build and run on Linux
 
