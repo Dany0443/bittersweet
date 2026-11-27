@@ -3023,6 +3023,15 @@ impl<T> WindowCache<T> {
         self.copies.get(&target).cloned()
     }
 
+    fn draw_window(&self, address: u64, end: u64) -> Option<(u64, u64)> {
+        let (cell, _) = window_of(address, end, WINDOW);
+        let candidates = self
+            .copies
+            .range((cell, 0)..=(address, u64::MAX))
+            .map(|(&key, _)| key);
+        holder(candidates, address, end)
+    }
+
     fn insert(&mut self, key: (u64, u64), copy: Arc<T>) {
         self.aliases.remove(&key);
         self.longest = self.longest.max(key.1);
@@ -3048,16 +3057,7 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
             .map(|(key, _)| *key);
         longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
     } else if any && fine() && !unsized_ask {
-        let from = if window_reuse() {
-            address.saturating_sub(map.longest)
-        } else {
-            cell
-        };
-        let there = map
-            .copies
-            .range((from, 0)..=(address, u64::MAX))
-            .map(|(key, _)| *key);
-        holder(there, address, end).unwrap_or(named)
+        map.draw_window(address, end).unwrap_or(named)
     } else {
         named
     };
@@ -3179,6 +3179,20 @@ mod window_tests {
         assert!(cache.named((u64::MAX - 2, 8), true).is_none());
         assert_eq!(cache.aliases.len(), 1);
         assert_eq!(cache.copies.len(), 1);
+    }
+
+    #[test]
+    fn draw_lookups_preserve_the_copy_in_the_current_cell() {
+        use super::WindowCache;
+        use std::sync::Arc;
+        let mut cache = WindowCache::new();
+        let base = 4 * WINDOW;
+        let local = (base + WINDOW, WINDOW / 2);
+        cache.insert(local, Arc::new(1u32));
+        cache.insert((base, 2 * WINDOW), Arc::new(2));
+        let address = local.0 + 64;
+        assert_eq!(cache.draw_window(address, address + 64), Some(local));
+        assert_eq!(cache.draw_window(local.0 + local.1, local.0 + local.1 + 64), None);
     }
 
     /// An ask that may take any window takes the longest that holds all of
