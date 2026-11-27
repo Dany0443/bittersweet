@@ -31,7 +31,7 @@ may perform differently.
 
 | GPU | Architecture | Observed Behavior | Known Issues |
 |---|---|---|---|
-| Radeon RX 5700 | RDNA 1 (gfx10.1) | Boots to the main and settings menus and completes initial loading screens on a secondary test system. | 3D world rendering beyond the loading screen is unverified (no hardware mesh shader support). Full system specs, driver and Proton version pending. |
+| Radeon RX 5700 | RDNA 1 (gfx10.1) | Renders the character and outdoor 3D world through the compute mesh fallback on RADV and GE-Proton11-12 with VKD3D-Proton `71cae09`. | World frames take many seconds, with missing or dark materials. System-wide memory pressure ended the 16 GB test run. |
 
 ## Build and run on Linux
 

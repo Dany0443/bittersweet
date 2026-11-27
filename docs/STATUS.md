@@ -16,6 +16,15 @@ should research current upstream sources when a task depends on them.
 | Windows runtime | Windows-target release cross-builds on Linux; account/player prompt rendered under GE-Proton11-12 |
 | First mission | Not verified; simple scaling presents changing 3D and composed credits, but frame times remain far above the target |
 
+The RX 5700 rendered the character and outdoor geometry in a bounded
+Series S profile run on 2026-11-27. The test used GE-Proton11-12 with local
+VKD3D-Proton build `71cae09` and the compute mesh fallback. Visible 3D
+appeared after more than three minutes, with dark and missing materials.
+Sampled world frames took 14 to 27 seconds. Peak use was 7.4 GiB RAM,
+7.9 GiB VRAM and 4.0 GiB swap. Systemd-oomd stopped the test scope after
+231 seconds under system-wide memory pressure. The kernel logged no new
+GPU reset. Sustained play remains unverified.
+
 Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
 Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
 account/player prompt rendered after the presentation fixes. Synthetic GPU
