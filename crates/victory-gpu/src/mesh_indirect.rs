@@ -40,44 +40,52 @@ pub(crate) const fn draw_stride(expanded: bool) -> u32 {
 }
 
 const SOURCE: &str = r#"
-#define RS "RootConstants(num32BitConstants=16, b0), UAV(u0), UAV(u1), UAV(u2)"
 cbuffer Plan : register(b0) {
     uint records; uint stride; uint counted; uint capacity;
     uint vertex_bytes; uint primitives; uint prim_bytes; uint expanded;
     uint2 vertices; uint2 indices; uint2 prims; uint draws; uint unused;
 };
 // The title's records (clamped: x groups, then 1, 1) and their count.
-RWByteAddressBuffer args : register(u0);
-RWByteAddressBuffer count : register(u1);
-RWByteAddressBuffer commands : register(u2);
+RWStructuredBuffer<uint> args : register(u0);
+RWStructuredBuffer<uint> count : register(u1);
+RWStructuredBuffer<uint> commands : register(u2);
 uint2 at(uint2 base, uint offset) {
     uint lo = base.x + offset;
     return uint2(lo, base.y + (lo < base.x ? 1u : 0u));
 }
-[RootSignature(RS)]
 [numthreads(1, 1, 1)]
 void main() {
-    uint n = counted != 0 ? min(count.Load(0), records) : records;
+    uint n = counted != 0 ? min(count[0], records) : records;
     // Groups of the records so far: where the next record's output starts.
     uint used = 0;
     for (uint i = 0; i < records; i++) {
-        uint g = i < n ? args.Load(i * stride) : 0u;
+        uint g = i < n ? args[i * stride / 4] : 0u;
         if (g > capacity - used) {
             g = 0;
         }
-        uint c = i * 40;
-        commands.Store2(c, at(vertices, used * vertex_bytes));
-        commands.Store2(c + 8, at(indices, used * primitives * 12));
-        commands.Store2(c + 16, at(prims, used * prim_bytes));
-        commands.Store3(c + 24, uint3(g, 1, 1));
+        uint c = i * 10;
+        uint2 v = at(vertices, used * vertex_bytes);
+        uint2 ix = at(indices, used * primitives * 12);
+        uint2 p = at(prims, used * prim_bytes);
+        commands[c] = v.x;
+        commands[c + 1] = v.y;
+        commands[c + 2] = ix.x;
+        commands[c + 3] = ix.y;
+        commands[c + 4] = p.x;
+        commands[c + 5] = p.y;
+        commands[c + 6] = g;
+        commands[c + 7] = 1;
+        commands[c + 8] = 1;
         uint first = used * primitives * 3;
-        uint d = draws + i * (expanded != 0 ? 24 : 32);
-        commands.Store2(d, at(vertices, used * vertex_bytes));
-        // Count, one instance, first index or vertex, then a base vertex
-        // and first instance of 0 (indexed) or a first instance of 0.
-        commands.Store4(d + 8, uint4(primitives * 3 * g, 1, first, 0));
+        uint d = draws / 4 + i * (expanded != 0 ? 6 : 8);
+        commands[d] = v.x;
+        commands[d + 1] = v.y;
+        commands[d + 2] = primitives * 3 * g;
+        commands[d + 3] = 1;
+        commands[d + 4] = first;
+        commands[d + 5] = 0;
         if (expanded == 0) {
-            commands.Store(d + 24, 0);
+            commands[d + 6] = 0;
         }
         used += g;
     }
@@ -111,6 +119,31 @@ pub(crate) fn convert() -> Option<&'static Convert> {
         .as_ref()
 }
 
+fn root_signature(device: &ID3D12Device) -> windows::core::Result<ID3D12RootSignature> {
+    let constants = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Constants: D3D12_ROOT_CONSTANTS {
+                Num32BitValues: 16,
+                ..Default::default()
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let uav = |register| D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_UAV,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                ShaderRegister: register,
+                RegisterSpace: 0,
+                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    crate::host::helper_root_signature(device, &[constants, uav(0), uav(1), uav(2)], &[])
+}
+
 fn make(device: &ID3D12Device) -> windows::core::Result<Convert> {
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
@@ -139,19 +172,18 @@ fn make(device: &ID3D12Device) -> windows::core::Result<Convert> {
                     errors.GetBufferSize(),
                 )
             };
-            tracing::warn!(
-                "mesh fallback argument pass: {}",
-                String::from_utf8_lossy(text)
-            );
+            let message = String::from_utf8_lossy(text);
+            tracing::warn!("mesh fallback argument pass: {message}");
+            return Err(windows::core::Error::new(e.code(), message.as_ref()));
         }
         return Err(e);
     }
     let code = code.ok_or_else(windows::core::Error::empty)?;
-    // SAFETY: the blob's own bytes; the root signature is inside the shader.
+    let root = root_signature(device)?;
+    // SAFETY: the blob owns its bytes; the description borrows the live root.
     unsafe {
         let bytes =
             std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, bytes)?;
         let pso: ID3D12PipelineState =
             device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&root),
