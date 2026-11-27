@@ -356,3 +356,9 @@ in `DoubleGhosty/cool_fox` PR 54, head
 inspected). This tree's shader-pack prebuild has a different list format;
 it checks both translation identity and retained library size. Synthetic
 list tests cover changed settings, legacy records and library truncation.
+
+Scalar condition-code operands follow `DoubleGhosty/cool_fox` main
+`636954118fae4a42fc75c84520836da147003073`, which attributes the behavior
+to VIctory commit `0b35b7f`. The existing scalar flag path supplies the
+Boolean, converted to the instruction's integer operand. Synthetic GPU
+readback checks both comparison results and arithmetic carry flags.

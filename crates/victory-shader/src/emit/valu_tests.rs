@@ -227,6 +227,28 @@ fn packed_byte_dots_preserve_full_accumulators_and_saturate() {
     }
 }
 
+#[test]
+fn scalar_condition_codes_can_be_read_as_integer_operands() {
+    let cases = [
+        [0, 0, 0, 0],
+        [1, 0, 0, 0],
+        [u32::MAX, 1, 0, 0],
+        [17, 17, 0, 0],
+    ];
+    for carry in [false, true] {
+        let flag = if carry { sop2(0, 12, 0, 1) } else { 0xbf060100 };
+        let shader = build_valu_cs(&[flag, vop1(1, 0, 253)]);
+        run_cases(&shader, &cases, |backend, _, [a, b, _, _], actual| {
+            let expected = if carry {
+                a.checked_add(b).is_none()
+            } else {
+                a == b
+            };
+            assert_eq!(actual, u32::from(expected), "{backend}: carry={carry}");
+        });
+    }
+}
+
 /// [`build_valu_cs`] with `threads` threads in x (thread index in `v0`
 /// on entry, before `body`) and `lds_bytes` of LDS (a multiple of 512).
 fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
