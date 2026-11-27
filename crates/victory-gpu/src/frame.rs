@@ -32,6 +32,19 @@ struct Clock {
     first: u64,
 }
 
+impl Clock {
+    fn next_at(&self, elapsed: Duration, previous: u64) -> (u64, Duration) {
+        let elapsed = elapsed.as_nanos();
+        let interval = self.interval.as_nanos().max(1);
+        let tick = (self.first + (elapsed / interval + 1) as u64).max(previous + 1);
+        let at = u128::from(tick - self.first) * interval;
+        (
+            tick,
+            Duration::from_nanos(at.saturating_sub(elapsed) as u64),
+        )
+    }
+}
+
 static CLOCK: Mutex<Option<Clock>> = Mutex::new(None);
 static FRAME: AtomicU64 = AtomicU64::new(0);
 
@@ -102,15 +115,7 @@ fn next_tick(kind: u32) -> (u64, Duration) {
         interval: SIXTIETH,
         first: 0,
     });
-    let elapsed = c.start.elapsed().as_nanos();
-    let interval = c.interval.as_nanos().max(1);
-    let tick =
-        (c.first + (elapsed / interval + 1) as u64).max(last(kind).load(Ordering::Relaxed) + 1);
-    let at = u128::from(tick - c.first) * interval;
-    (
-        tick,
-        Duration::from_nanos(at.saturating_sub(elapsed) as u64),
-    )
+    c.next_at(c.start.elapsed(), last(kind).load(Ordering::Relaxed))
 }
 
 /// Device method: blocks until the next tick (or the time-out); an origin
@@ -199,16 +204,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tick_plans_preserve_events_and_skip_elapsed_deadlines() {
+        let clock = Clock {
+            start: Instant::now(),
+            interval: Duration::from_millis(5),
+            first: 0,
+        };
+        for (elapsed, previous, expected, remaining) in [
+            (0, 0, 1, 5),
+            (5, 1, 2, 5),
+            (10, 2, 3, 5),
+            (35, 2, 8, 5),
+            (6, 3, 4, 14),
+        ] {
+            assert_eq!(
+                clock.next_at(Duration::from_millis(elapsed), previous),
+                (expected, Duration::from_millis(remaining))
+            );
+        }
+        let short = Clock {
+            interval: Duration::from_millis(2),
+            ..clock
+        };
+        assert_eq!(short.next_at(Duration::ZERO, 0).1, Duration::from_millis(2));
+    }
+
+    #[test]
     fn waits_end_on_ticks_and_count_frames() {
         let null = std::ptr::null();
         assert_eq!(set_interval(null, null, 2_000, 1, 0), S_OK);
         let mut first = 0;
         assert_eq!(wait(null, 0, 1_000, std::ptr::null(), 0, &mut first), S_OK);
-        let before = Instant::now();
         let mut second = 0;
         assert_eq!(wait(null, 0, 1_000, std::ptr::null(), 0, &mut second), S_OK);
         assert!(second > first);
-        assert!(before.elapsed() <= Duration::from_millis(50));
         assert_eq!(wait(null, 0, 0, std::ptr::null(), 0, &mut second), TIMEOUT);
         // Tokens count frames, a frame started early on a time-out too.
         let mut early = 0;
@@ -227,10 +256,15 @@ mod tests {
         // blocking flip wait. Each flip takes its own tick.
         const FLIP: u32 = 2;
         assert_eq!(set_interval(null, null, 5_000, 3, 0), S_OK);
-        let mut token = 0;
+        let mut token = current();
         let flips: Vec<u64> = (0..4)
-            .map(|_| {
+            .map(|i| {
+                if i == 2 {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                let before = token;
                 let _ = wait(null, 0, 0, std::ptr::null(), TOKEN_ON_TIMEOUT, &mut token);
+                assert_eq!(token, before + 1);
                 assert_eq!(
                     wait(null, FLIP, u32::MAX, std::ptr::null(), 0, &mut token),
                     S_OK
@@ -238,7 +272,8 @@ mod tests {
                 LAST[2].load(Ordering::Relaxed)
             })
             .collect();
-        assert!(flips.windows(2).all(|w| w[1] == w[0] + 1), "{flips:?}");
+        assert!(flips.windows(2).all(|w| w[1] > w[0]), "{flips:?}");
+        assert!(flips[2] > flips[1] + 1, "the pause skips ticks: {flips:?}");
         // Even when a flip wait begins on the tick another just ended on.
         let (tick, _) = next_tick(FLIP);
         assert!(tick > flips[3]);
