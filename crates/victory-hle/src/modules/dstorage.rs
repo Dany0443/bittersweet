@@ -453,7 +453,10 @@ fn read_direct(file: &std::fs::File, out: &mut [u8], offset: u64) -> std::io::Re
     const SECTOR: usize = 4096;
     const MOST: usize = 1 << 20;
     let sector = SECTOR as u64;
-    if offset % sector == 0 && out.len() % SECTOR == 0 && out.as_ptr() as usize % SECTOR == 0 {
+    if offset.is_multiple_of(sector)
+        && out.len().is_multiple_of(SECTOR)
+        && (out.as_ptr() as usize).is_multiple_of(SECTOR)
+    {
         return read_overlapped(file, out, offset);
     }
     thread_local! {
@@ -1593,7 +1596,10 @@ mod tests {
         assert_eq!(dstorage_workers(Some("0"), 12), 12);
         assert_eq!(dstorage_workers(Some("bad"), 12), 12);
         assert_eq!(dstorage_workers(Some("128"), 12), 64);
-        assert_eq!(dstorage_workers(Some("2"), 0), 1);
+        assert_eq!(dstorage_workers(None, 0), 1);
+        assert_eq!(dstorage_workers(Some("2"), 0), 2);
+        assert_eq!(dstorage_workers(Some("1"), 64), 1);
+        assert_eq!(dstorage_workers(None, 128), 64);
     }
 
     #[test]
