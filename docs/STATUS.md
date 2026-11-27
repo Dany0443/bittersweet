@@ -48,6 +48,15 @@ after 124 seconds. World samples with at least 500 draws ranged from 1.2
 to 2.8 fps. The two runs had different memory conditions and draw counts.
 The setting stays experimental.
 
+The descriptor sweep now caches ranges per heap. In a synthetic sweep
+with 85,098 descriptors, 14,464 buffers and 15,463 changes between full
+rebuilds, bookkeeping took 0.92 to 1.08 ms per pass, down from 1.84 to
+1.94 ms across three trials. Rewriting every slot was slower with the cache.
+The warmed RX 7600 build reached 1.7 to 2.7 fps in two world samples with
+at least 500 draws. The monitor stopped it after 75 seconds, at 902 MiB
+available RAM and 383 MiB free swap. The run still dropped draws for
+missing pipelines and did not establish a gameplay speedup.
+
 ## What works today
 
 | Area | State |
