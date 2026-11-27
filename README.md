@@ -80,8 +80,9 @@ Start without timed input so startup prompts wait for you.
 
 Linear 8-bit video planes now upload current pixels into a buffer owned by
 each command list. A synthetic GPU test verifies updates after unchanged
-frames. Smooth playback of the real intro and reaching its menu still need
-runtime verification.
+frames. On 2026-11-27, the user confirmed smooth intro playback and that the main
+menu appears before world loading. World rendering and memory pressure
+remain unresolved.
 
 ## Reported hardware results
 

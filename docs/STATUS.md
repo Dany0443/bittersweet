@@ -104,6 +104,12 @@ samples were about 1.7 to 2.5 fps, with 280 to 400 ms preparing submissions,
 These runs do not establish a lighting fix, a performance gain or sustained
 builder correctness; the builder remains opt-in.
 
+The per-list movie-plane upload port fixes a synthetic stale-frame GPU
+readback regression. On 2026-11-27, the user tested the updated Proton run
+with timed input disabled and confirmed smooth intro playback and arrival
+at the main menu. This is user-confirmed visual behavior, not a measured
+video cadence or evidence that world memory pressure is resolved.
+
 ## What is missing
 
 1. **Mission-level execution evidence.** Proton reaches the account/player

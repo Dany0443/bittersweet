@@ -461,5 +461,5 @@ Adapted the per-list CPU movie-plane upload technique from
 [Pavl3000/cgbj-fork commit 8cc31ab37afcae231e46696042342bb5af2f0f2a](https://github.com/Pavl3000/cgbj-fork/commit/8cc31ab37afcae231e46696042342bb5af2f0f2a),
 originally authored by codec_d. This port reuses bittersweet's list-owned
 upload buffers and conservative submission callbacks. A synthetic GPU
-readback test covers changed frames after unchanged frames. Real intro
-playback cadence remains unverified.
+readback test covers changed frames after unchanged frames. The user subsequently
+confirmed smooth intro playback and main-menu arrival under Proton.
