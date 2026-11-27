@@ -87,6 +87,16 @@ incomplete. First runs can stutter during shader compilation. Caches and
 saves default to the external Wine prefix; see
 [victory.example.toml](victory.example.toml) to configure their locations.
 
+After rebuilding, you can warm pipelines observed in earlier runs before
+loading the world. Use the same Proton prefix and environment as above.
+
+```bash
+"$PROTONPATH/proton" run \
+  "$PWD/target/x86_64-pc-windows-msvc/release/victory.exe" \
+  translate --pipelines --cache --early-only --jobs 1 \
+  "$VICTORY_GAME_DIR\\shaders.rpf"
+```
+
 To update, run `git pull --ff-only` and repeat the build command. For host
 checks without starting the title, run `cargo run -p bittersweet -- doctor`.
 

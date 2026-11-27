@@ -46,6 +46,17 @@ fell as low as 952 MiB, and free swap reached zero. The trial did not
 establish a speedup or verify world material appearance. The mode stays
 opt-in.
 
+The write-watch journal now reports the latest observed write generation
+to each refresh. The Proton regression test verifies that a cached query
+stops reporting an already copied page as dirty and still detects a later
+write. The cold RX 7600 trial entered the world with more than 1,600
+pipelines pending and took 13 to 25 seconds per frame. A separate run with
+ray-miss mode off and 2,422 prewarmed pipelines drew the account picker
+and loading screens at about 30 fps. The title also produced audio in its
+PipeWire stream at startup. The memory monitor stopped the run during
+world loading with 657 MiB of available RAM and no free swap, before any
+world performance sample could be measured.
+
 The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
 PR #139. The corrected lowering passes GPU readback checks for signed and
 unsigned min/max, zero, equal operands and selected values under Proton.
