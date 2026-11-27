@@ -14,6 +14,8 @@ use super::{VIEW_TAG, View, view_at};
 use crate::host::host;
 
 pub(crate) struct HostHeap {
+    #[cfg(feature = "diagnostics")]
+    pub(crate) material_trace: crate::material_trace::Mailbox,
     pub(crate) heap: ID3D12DescriptorHeap,
     cpu: usize,
     step: u32,
@@ -767,6 +769,8 @@ impl HostHeap {
             })
             .flatten();
         let h = HostHeap {
+            #[cfg(feature = "diagnostics")]
+            material_trace: Default::default(),
             heap,
             cpu,
             step,
@@ -1666,6 +1670,15 @@ impl HostHeap {
     /// The view host slot `index` was made from, in a few words, with the
     /// title and host addresses of a buffer view (diagnostics). "null" for
     /// a slot never made or left null.
+    #[cfg(feature = "diagnostics")]
+    pub(crate) fn slot_resident(&self, index: u32) -> bool {
+        self.kept
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(index as usize)
+            .is_some_and(Option::is_some)
+    }
+
     #[cfg(feature = "diagnostics")]
     pub(crate) fn describe_slot(&self, index: u32) -> Option<String> {
         let key = *self.made.lock().unwrap_or_else(|e| e.into_inner()).get(index as usize)?;

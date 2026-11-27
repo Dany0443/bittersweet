@@ -374,3 +374,13 @@ wine-staging `6cc805ea57132eeaf44764e9213823c9b8d0d300`. The complete release
 protocol is regenerated before testing. Synthetic mapping churn and GPU
 readback pass; title frame times improve but remain far from playable.
 No Wine sources or binaries are distributed in this tree by this experiment.
+
+## Character material diagnostics
+
+The bounded character material readback follows open
+[DexNom/VIctory PR 49](https://github.com/DexNom/VIctory/pull/49), head
+`96758952e6852fadfbb8e99d514b5d6660da447f`. This adaptation reads the two
+deferred character layouts from the bound GPU buffer and reports current
+descriptor residency. It does not yet port the PR's texture-demand or
+typed-view recovery behavior. Diagnostics retain at most eight pending
+readbacks, cancel them on list reset and validate the source before reporting.

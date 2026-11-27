@@ -2246,6 +2246,8 @@ struct Deferred {
     backs: Vec<(ID3D12Resource, usize, [usize; 3])>,
     /// Whether a step zeroes the indirect-work budget.
     budget_zeroed: bool,
+    #[cfg(feature = "diagnostics")]
+    afters: Vec<Box<dyn FnOnce() + Send>>,
 }
 
 impl Deferred {
@@ -3356,6 +3358,12 @@ fn read_backs(list: &HostList) {
                 buffer.Unmap(0, None);
             }
         }
+    }
+    #[cfg(feature = "diagnostics")]
+    let afters = std::mem::take(&mut list.deferred().afters);
+    #[cfg(feature = "diagnostics")]
+    for after in afters {
+        after();
     }
 }
 
@@ -5944,6 +5952,10 @@ impl HostList {
     pub(crate) fn untouched(&self) -> bool {
         {
             let deferred = self.deferred();
+            #[cfg(feature = "diagnostics")]
+            if !deferred.afters.is_empty() {
+                return false;
+            }
             if !(deferred.copies.is_empty()
                 && deferred.uploads.is_empty()
                 && deferred.kept.is_empty()
@@ -6051,6 +6063,11 @@ impl HostList {
         self.deferred()
             .backs
             .push((buffer, dst as usize, [row, rows, pitch]));
+    }
+
+    #[cfg(feature = "diagnostics")]
+    pub(crate) fn defer_after(&self, after: impl FnOnce() + Send + 'static) {
+        self.deferred().afters.push(Box::new(after));
     }
 
     /// Stores `what` (`bytes` of it) at `dst` once the list has run.
@@ -7234,6 +7251,55 @@ mod layer_tests {
         ] {
             super::PlanePass::make(steps, format).expect("depth plane pipeline");
         }
+    }
+
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn completion_reads_gpu_copy_once_and_reset_cancels_pending_work() {
+        use super::*;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let host = host().expect("host GPU");
+        let commands = host.new_list().unwrap();
+        let (source, data) = host.upload_buffer(16).unwrap();
+        let back = host.read_back_buffer(16).unwrap();
+        let expected = [0xf800_0003u32, 7, 19, 31];
+        unsafe {
+            data.cast::<u32>()
+                .copy_from_nonoverlapping(expected.as_ptr(), 4);
+            commands.list.CopyBufferRegion(&back, 0, &source, 0, 16);
+        }
+        commands.keep(&source);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let called = calls.clone();
+        commands.defer_after(move || {
+            unsafe {
+                let mut data = std::ptr::null_mut();
+                back.Map(0, None, Some(&mut data)).unwrap();
+                assert_eq!(std::slice::from_raw_parts(data.cast::<u32>(), 4), expected);
+                back.Unmap(0, None);
+            }
+            called.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        commands.close();
+        host.execute(&[&commands]);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        read_backs(&commands);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        commands.reset();
+        let pending = calls.clone();
+        commands.defer_after(move || {
+            pending.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(Arc::strong_count(&calls), 2);
+        assert!(!commands.untouched());
+        commands.close();
+        commands.reset();
+        assert_eq!(Arc::strong_count(&calls), 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
     #[cfg(feature = "diagnostics")]

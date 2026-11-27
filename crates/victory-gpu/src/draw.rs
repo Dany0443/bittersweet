@@ -1009,6 +1009,31 @@ impl State {
                         None => self.user_value(compute, u.slot, u.root, u.dword),
                     };
                 }
+                #[cfg(feature = "diagnostics")]
+                if !compute
+                    && crate::material_trace::enabled()
+                    && let Some(u) = t
+                        .host
+                        .user_data
+                        .iter()
+                        .find(|u| u.index == 14 && u.root == RootType::Constants)
+                    && t.host
+                        .user_data
+                        .iter()
+                        .any(|u| u.index == 8 && u.root == RootType::Table && u.slot == 0)
+                    && let Some(&Root::Table(table)) = self.roots_ref(compute).first()
+                    && let Some(heap) = self.heap_of(table)
+                    && !heap.samplers()
+                    && values.get(8).copied().map(u64::from) == table.checked_sub(heap.start)
+                {
+                    crate::material_trace::record(
+                        list,
+                        heap,
+                        table,
+                        self.user_value(compute, u.slot, u.root, u.dword),
+                        &stage.shader.hash,
+                    );
+                }
                 // SAFETY: an open list; `values` covers the parameter.
                 unsafe {
                     if compute {
@@ -1577,6 +1602,8 @@ impl State {
         // Slots whose texture's memory the runtime mapped, unmapped or
         // wrote since the last pass are due again.
         host.texture_slots_remapped(frame);
+        #[cfg(feature = "diagnostics")]
+        crate::material_trace::report(heap, host, frame);
         host.texture_sweep(heap, frame);
         let (due, census) = host.texture_slots_due(frame, 4096);
         HEAP_TEXTURES_WAITING.store(census[0], Ordering::Relaxed);
