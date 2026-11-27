@@ -4543,7 +4543,9 @@ impl<'a> Lower<'a> {
         let fits = |m: super::shader::Mesh| {
             mesh_output_bytes(outputs, prims, m.max_vertices, m.max_primitives) <= MESH_OUTPUT_LIMIT
         };
-        if !fits(mesh) {
+        // As compute the outputs are plain buffers with no such cap, and the
+        // record strides must stay the declared maxima `MeshLayout` reports.
+        if !self.x.mesh_as_compute && !fits(mesh) {
             mesh.max_vertices = mesh.max_vertices.min(threads);
             mesh.max_primitives = mesh.max_primitives.min(threads);
             // shortcut: outputs past the cap even at the lane count are
