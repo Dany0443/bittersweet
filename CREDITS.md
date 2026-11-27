@@ -436,3 +436,21 @@ The per-pipeline cumulative wait cap (`VICTORY_PIPELINE_WAIT_CAP_MS`, default
 5000 ms) is ported from `PastiiJay/klbf-lab` (`origin/beta-amd`, commit
 `4c79ac52728f29163a4bad807911838a9f1c9774`), preventing unbuilt pipelines
 from consuming the frame wait budget on every subsequent frame.
+
+## Mesh-as-compute lowering for RDNA 1 (gfx10.1)
+
+The `translate_mesh_as_compute` / `emit_mesh_as_compute` public API,
+`MeshLayout`, `MeshFallback`, the `mesh_vs` fallback vertex shader module,
+`MESH_OUT_SPACE`, the `mesh_out_handle` / `mesh_in_handle` helpers on `Shader`,
+the mesh-output UAV/SRV metadata emission in `shader.rs`, and the
+`mesh_as_compute`-gated branches in `lower.rs` (`setMeshOutputCounts`
+suppression, UAV stores for vertex/primitive/index outputs, group-id-relative
+index offsetting) are ported from
+`frojo2211-ctrl/VIctory-RDNA1-Hybrid` public snapshot `f8297c2` (GPL-3.0-or-later).
+
+The port adapts field names and struct layout to the `bittersweet` / `klbf-lab`
+`HostShader` (which carries no `space_shift`), introduces `emit_program_with`
+to share signature and lowering logic between normal and compute-lowered paths,
+and gates the compute path explicitly on the `mesh_as_compute` flag in
+`lower::Parts` so RDNA 2+, RDNA 3, RDNA 4, and NVIDIA paths continue to use
+native mesh shaders unchanged.

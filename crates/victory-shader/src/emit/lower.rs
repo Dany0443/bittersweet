@@ -74,6 +74,10 @@ pub(crate) struct Lowered {
     pub heap_props: Vec<(u32, u32)>,
 }
 
+const MESH_VERTICES: u8 = 0;
+const MESH_INDICES: u8 = 1;
+const MESH_PRIMITIVES: u8 = 2;
+
 pub(crate) struct Parts<'a> {
     pub native: &'a NativeProgram,
     pub p: &'a Program,
@@ -87,7 +91,6 @@ pub(crate) struct Parts<'a> {
     pub mesh_stride: u32,
     /// Mesh: emit a compute shader that writes the outputs to the mesh
     /// output UAVs ([`super::MeshLayout`]) instead of a mesh shader.
-    #[allow(dead_code)]
     pub mesh_as_compute: bool,
 }
 
@@ -4384,8 +4387,10 @@ impl<'a> Lower<'a> {
             self.s.m.i32(mesh.max_vertices),
             self.s.m.i32(mesh.max_primitives),
         );
-        self.s
-            .op(e, "setMeshOutputCounts", Attr::NoUnwind, void, 168, &[v, p]);
+        if !self.x.mesh_as_compute {
+            self.s
+                .op(e, "setMeshOutputCounts", Attr::NoUnwind, void, 168, &[v, p]);
+        }
         let flat = self.mesh_thread();
         let z = self.s.m.i32(0);
         // Every primitive of the declared count starts culled, also those
@@ -4404,17 +4409,64 @@ impl<'a> Lower<'a> {
             let guard = ((pass + 1) * threads > mesh.max_primitives)
                 .then(|| self.s.m.cmp(self.cur, pred::IULT, index, p));
             let at = self.begin_guarded(guard);
-            self.s.op(
-                self.cur,
-                "emitIndices",
-                Attr::NoUnwind,
-                void,
-                169,
-                &[index, z, z, z],
-            );
+            if self.x.mesh_as_compute {
+                self.mesh_out_store(MESH_INDICES, index, &[z, z, z]);
+            } else {
+                self.s.op(
+                    self.cur,
+                    "emitIndices",
+                    Attr::NoUnwind,
+                    void,
+                    169,
+                    &[index, z, z, z],
+                );
+            }
             self.end_guarded(at, &[]);
         }
         Ok(())
+    }
+
+    /// Mesh run as compute: stores `vals` (consecutive dwords) for vertex or
+    /// primitive `slot` of this group in mesh output UAV `out`, at dword
+    /// `dword` of its record. See [`super::MeshLayout`] for the layout.
+    fn mesh_out_store_at(&mut self, out: u8, slot: V, dword: u32, vals: &[V]) {
+        let mesh = self.s.mesh.expect("mesh");
+        let (per_group, record) = match out {
+            MESH_VERTICES => (mesh.max_vertices, 4 * self.s.outputs.len() as u32),
+            MESH_INDICES => (mesh.max_primitives, 3),
+            _ => (mesh.max_primitives, 4 * self.s.prims.len() as u32),
+        };
+        let c = self.cur;
+        let g = self.mesh_group_id();
+        let n = self.s.m.i32(per_group);
+        let first = self.s.m.bin(c, Bin::Mul, g, n);
+        let index = self.s.m.bin(c, Bin::Add, first, slot);
+        let rec = self.s.m.i32(record * 4);
+        let base = self.s.m.bin(c, Bin::Mul, index, rec);
+        let within = self.s.m.i32(dword * 4);
+        let off = self.s.m.bin(c, Bin::Add, base, within);
+        let h = self.s.mesh_out_handle(out);
+        let iu = self.s.m.undef(self.s.t.i32);
+        let mut args = vec![h, off, iu];
+        args.extend(vals);
+        args.resize(3 + 4, iu);
+        args.push(self.s.m.i8((1u8 << vals.len()) - 1));
+        args.push(self.s.m.i32(4));
+        let void = self.s.t.void;
+        self.s
+            .op(c, "rawBufferStore.i32", Attr::NoUnwind, void, 140, &args);
+    }
+
+    fn mesh_out_store(&mut self, out: u8, slot: V, vals: &[V]) {
+        self.mesh_out_store_at(out, slot, 0, vals);
+    }
+
+    /// Mesh run as compute: the group's number (its id in x).
+    fn mesh_group_id(&mut self) -> V {
+        let Val::I32(g) = self.compute_id("groupId.i32", 94, 0) else {
+            unreachable!()
+        };
+        g
     }
 
     /// Mesh: the thread's index in the group, which is its vertex and
@@ -11660,8 +11712,15 @@ impl<'a> Lower<'a> {
                 x = self.as_int(f);
             }
             let pixel = self.s.pixel;
+            let mac = self.x.mesh_as_compute;
             let el = &mut elements(self, primitive)[id];
             el.usage |= 1 << col;
+            if mac {
+                let out = if primitive { MESH_PRIMITIVES } else { MESH_VERTICES };
+                let slot = self.mesh_thread();
+                self.mesh_out_store_at(out, slot, id as u32 * 4 + u32::from(col), &[x]);
+                continue;
+            }
             let (kind, comp) = (el.kind, el.comp);
             let target = !mesh && pixel && kind == 16 && comp == 9;
             let (suffix, x) = match comp {
@@ -11731,25 +11790,41 @@ impl<'a> Lower<'a> {
             m.max_vertices
                 .min(self.s.threads.map_or(u32::MAX, |t| t[0]))
         });
+        let first = if self.x.mesh_as_compute {
+            let g = self.mesh_group_id();
+            let n = self.s.m.i32(self.s.mesh.expect("mesh").max_vertices);
+            Some(self.s.m.bin(c, Bin::Mul, g, n))
+        } else {
+            None
+        };
         let mut indices = [z; 3];
         for (k, slot) in indices.iter_mut().enumerate() {
             let (shift, mask) = (self.s.m.i32(10 * k as u32), self.s.m.i32(0x3FF));
             let i = self.s.m.bin(c, Bin::LShr, x, shift);
-            let i = self.s.m.bin(c, Bin::And, i, mask);
+            let mut i = self.s.m.bin(c, Bin::And, i, mask);
             if let Some(n) = written {
                 let n = self.s.m.i32(n);
                 let past = self.s.m.cmp(c, pred::IUGE, i, n);
                 culled = self.s.m.bin(c, Bin::Or, culled, past);
             }
+            if let Some(first) = first {
+                i = self.s.m.bin(c, Bin::Add, i, first);
+            }
             *slot = i;
         }
-        let mut args = vec![flat];
-        for i in indices {
-            args.push(self.s.m.select(c, culled, z, i));
+        let mut culled_indices = [z; 3];
+        for (dst, i) in culled_indices.iter_mut().zip(indices) {
+            *dst = self.s.m.select(c, culled, z, i);
         }
-        let void = self.s.t.void;
-        self.s
-            .op(c, "emitIndices", Attr::NoUnwind, void, 169, &args);
+        if self.x.mesh_as_compute {
+            self.mesh_out_store(MESH_INDICES, flat, &culled_indices);
+        } else {
+            let mut args = vec![flat];
+            args.extend(culled_indices);
+            let void = self.s.t.void;
+            self.s
+                .op(c, "emitIndices", Attr::NoUnwind, void, 169, &args);
+        }
         self.end_guarded(at, &[]);
         Ok(())
     }

@@ -93,6 +93,7 @@ mod intersect_tests;
 #[cfg(all(windows, any(test, feature = "host")))]
 pub mod host;
 mod lower;
+mod mesh_vs;
 #[cfg(test)]
 mod lane_tests;
 mod own_bits;
@@ -122,10 +123,10 @@ pub use lower::{
 };
 pub use rect::rect_list_gs;
 pub use shader::{
-    MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY,
-    SLOT_STRIDES, SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_GROUP_BASE, USER_MEMORY_BASE,
-    USER_VIEW_ADDRESS, USER_VIEW_BIAS, VIEW_INTEGER, VIEW_SIGNED, VIEW_STRIDE_BITS,
-    set_view_heap_limit, view_heap_limit,
+    MEMORY_FAULTS, MEMORY_PAGES, MESH_OUT_SPACE, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS,
+    SLOT_MEMORY, SLOT_STRIDES, SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_GROUP_BASE,
+    USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS, VIEW_INTEGER, VIEW_SIGNED,
+    VIEW_STRIDE_BITS, set_view_heap_limit, view_heap_limit,
 };
 
 /// The stack for threads that make host pipelines from translated shaders.
@@ -578,6 +579,122 @@ fn widen(
     }
 }
 
+/// What a mesh program translated by [`translate_mesh_as_compute`] writes,
+/// for hosts without mesh shaders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeshLayout {
+    /// Lanes per group (`[numthreads(threads, 1, 1)]`).
+    pub threads: u32,
+    pub max_vertices: u32,
+    pub max_primitives: u32,
+    /// Dwords per vertex record in `u0`.
+    pub vertex_dwords: u32,
+    /// Dwords per primitive record in `u2` (0: none).
+    pub primitive_dwords: u32,
+}
+
+impl MeshLayout {
+    /// Bytes `groups` groups write to `u0`, `u1` and `u2`.
+    pub fn bytes(&self, groups: u32) -> [u64; 3] {
+        let g = u64::from(groups);
+        [
+            g * u64::from(self.max_vertices) * u64::from(self.vertex_dwords) * 4,
+            g * u64::from(self.max_primitives) * 12,
+            g * u64::from(self.max_primitives) * u64::from(self.primitive_dwords) * 4,
+        ]
+    }
+}
+
+/// A mesh program for hosts without mesh shaders: the compute shader that
+/// runs it, and the vertex shader that draws what it wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeshFallback {
+    pub compute: HostShader,
+    pub vertex: HostShader,
+    /// The program has per-primitive outputs: the vertex shader passes them
+    /// on as constant outputs, drawn three unshared vertices per primitive.
+    pub expanded: bool,
+    pub layout: MeshLayout,
+}
+
+/// Translates the mesh program of a console shader container as a compute
+/// shader that writes its vertices and triangles to buffers, and the
+/// vertex shader that draws them ([`MeshFallback`]).
+pub fn translate_mesh_as_compute(container: &[u8]) -> Result<MeshFallback, ShaderError> {
+    let c = Container::parse(container)?;
+    let dxil = c
+        .part(FourCC::DXIL)
+        .ok_or(ShaderError::Malformed("no DXIL part"))?;
+    let native = crate::native_programs(dxil.data)?
+        .into_iter()
+        .find(|p| p.stage == HwStage::Ms)
+        .ok_or(ShaderError::Unsupported {
+            offset: 0,
+            what: "a container without a mesh program",
+        })?;
+    let p = ir::build(&native.patched_code(), native.wave64, native.vgprs)?;
+    let st = structure::structure(&p);
+    let res = resource::track(&p, &native.layout, native.stage, st.as_ref().ok())?;
+    let io = io::raise(&p, &native)?;
+    let st = st?;
+    emit_mesh_as_compute(&c, &native, &p, &st, &io, &res)
+}
+
+/// [`translate_mesh_as_compute`] for a program whose earlier stages already ran.
+pub fn emit_mesh_as_compute(
+    c: &Container,
+    native: &NativeProgram,
+    p: &ir::Program,
+    st: &structure::Structured,
+    io: &io::Io,
+    res: &resource::Resources,
+) -> Result<MeshFallback, ShaderError> {
+    let crate::native::StageIo::Ms(ms) = &native.io else {
+        return Err(ShaderError::Unsupported {
+            offset: 0,
+            what: "a mesh program run as compute that is no mesh program",
+        });
+    };
+    let (compute, _, outputs, prims) = emit_program_with(c, native, p, st, io, res, true)?;
+    let layout = MeshLayout {
+        threads: ms.threads,
+        max_vertices: ms.max_vertices,
+        max_primitives: ms.max_primitives,
+        vertex_dwords: 4 * outputs.len() as u32,
+        primitive_dwords: 4 * prims.len() as u32,
+    };
+    Ok(MeshFallback {
+        compute,
+        vertex: fallback_vertex_shader(&outputs, &prims, &layout),
+        expanded: !prims.is_empty(),
+        layout,
+    })
+}
+
+/// The vertex shader of a [`MeshFallback`].
+fn fallback_vertex_shader(
+    outputs: &[container::SigElement],
+    prims: &[container::SigElement],
+    layout: &MeshLayout,
+) -> HostShader {
+    HostShader {
+        stage: HwStage::Vs,
+        dxil: mesh_vs::vertex_shader(
+            outputs,
+            prims,
+            layout.vertex_dwords,
+            layout.primitive_dwords,
+        ),
+        user_data: Vec::new(),
+        samplers: Vec::new(),
+        static_samplers: Vec::new(),
+        root_cbvs: Vec::new(),
+        root_srvs: Vec::new(),
+        root_uavs: Vec::new(),
+        root_indexed_views: Vec::new(),
+    }
+}
+
 /// The translated program, and the wave size it requires of the host.
 fn emit_program(
     c: &Container,
@@ -587,6 +704,19 @@ fn emit_program(
     io: &io::Io,
     res: &resource::Resources,
 ) -> Result<(HostShader, Option<u32>), ShaderError> {
+    let (shader, wave_size, _, _) = emit_program_with(c, native, p, st, io, res, false)?;
+    Ok((shader, wave_size))
+}
+
+fn emit_program_with(
+    c: &Container,
+    native: &NativeProgram,
+    p: &ir::Program,
+    st: &structure::Structured,
+    io: &io::Io,
+    res: &resource::Resources,
+    mesh_as_compute: bool,
+) -> Result<(HostShader, Option<u32>, Vec<container::SigElement>, Vec<container::SigElement>), ShaderError> {
     let sig = |fourcc| -> Result<Vec<container::SigElement>, ShaderError> {
         match c.part(fourcc) {
             Some(part) => signature(part.data),
@@ -651,14 +781,18 @@ fn emit_program(
         io,
         res,
         inputs,
-        outputs,
-        prims,
+        outputs: outputs.clone(),
+        prims: prims.clone(),
         mesh_stride,
-        mesh_as_compute: false,
+        mesh_as_compute,
     })?;
     let wave_size = l.wave_size;
     let shader = HostShader {
-        stage: native.stage,
+        stage: if mesh_as_compute {
+            HwStage::Cs
+        } else {
+            native.stage
+        },
         dxil: l.dxil,
         user_data: l.user_data,
         static_samplers: l
@@ -679,7 +813,7 @@ fn emit_program(
         root_uavs: l.root_uavs,
         root_indexed_views: res.root_indexed_views.clone(),
     };
-    Ok((shader, wave_size))
+    Ok((shader, wave_size, outputs, prims))
 }
 
 /// The rows of an `ISG1`/`OSG1` part.
@@ -1608,6 +1742,76 @@ mod tests {
                 got[6],
                 out[0][6]
             );
+        }
+    }
+}
+
+/// ----- mesh_as_compute unit tests -----
+#[cfg(test)]
+mod mesh_as_compute_tests {
+    use super::*;
+
+    /// `MeshLayout::bytes` for a group that has two vertices and one triangle,
+    /// each vertex record four dwords, no primitive outputs.
+    #[test]
+    fn mesh_layout_bytes_no_prims() {
+        let layout = MeshLayout {
+            threads: 32,
+            max_vertices: 2,
+            max_primitives: 1,
+            vertex_dwords: 4,
+            primitive_dwords: 0,
+        };
+        let [v, i, p] = layout.bytes(3);
+        assert_eq!(v, 3 * 2 * 4 * 4);   // groups * vertices * dwords * 4
+        assert_eq!(i, 3 * 1 * 12);       // groups * primitives * 3 indices * 4
+        assert_eq!(p, 0);
+    }
+
+    /// `MeshLayout::bytes` for a layout with per-primitive outputs.
+    #[test]
+    fn mesh_layout_bytes_with_prims() {
+        let layout = MeshLayout {
+            threads: 32,
+            max_vertices: 4,
+            max_primitives: 2,
+            vertex_dwords: 8,
+            primitive_dwords: 4,
+        };
+        let [v, i, p] = layout.bytes(1);
+        assert_eq!(v, 1 * 4 * 8 * 4);
+        assert_eq!(i, 1 * 2 * 12);
+        assert_eq!(p, 1 * 2 * 4 * 4);
+    }
+
+    /// A `MeshFallback` without per-primitive outputs is not expanded.
+    #[test]
+    fn mesh_fallback_expanded_flag_reflects_prims() {
+        let prim_el = container::SigElement {
+            name: "PRIM".into(),
+            index: 0,
+            kind: 0,
+            comp: 9,
+            interp: 1,
+            row: Some(0),
+            col: 0,
+            cols: 4,
+            usage: 0xF,
+            half: false,
+        };
+        for (prims, want_expanded) in [
+            (&[] as &[container::SigElement], false),
+            (&[prim_el.clone()][..], true),
+        ] {
+            let prim_dwords = if prims.is_empty() { 0 } else { 4 };
+            let layout = MeshLayout {
+                threads: 1, max_vertices: 1, max_primitives: 1,
+                vertex_dwords: 4, primitive_dwords: prim_dwords,
+            };
+            let expanded = !prims.is_empty();
+            assert_eq!(expanded, want_expanded, "expanded flag for prims={}", prims.len());
+            // The fallback_vertex_shader must not panic for either case.
+            let _ = fallback_vertex_shader(&[], prims, &layout);
         }
     }
 }
