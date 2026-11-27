@@ -52,6 +52,16 @@ unmapped. Diagnostics now read back composed presentation as well as direct
 copies; a synthetic two-layer hardware test verifies both layer colors.
 The earlier visible-scene evidence remains separate.
 
+A subsequent 176-second title test verified the composed capture path in
+the real runtime: saved frames show the character, street and vehicles.
+World samples remained about 0.2 to 0.7 fps with no pipelines pending.
+Memory-mapping changes took roughly 979 ms per frame during streaming,
+and process samples found wineserver using 70 to 90 percent of one core.
+These measurements motivate testing the current cool_fox Wine mapping
+optimization; they do not establish its benefit here. An isolated server
+built from GE-Proton's base Wine revision failed the client protocol check
+and was not used for a title test. GE-Proton's complete patch set is needed.
+
 A prebuilt run reached world rendering with no pipelines pending and still
 ran around 0.7 to 1 fps. It stopped after 164 seconds with a RADV GPUVM
 read fault and device removal. A breadcrumb-enabled diagnostic run
