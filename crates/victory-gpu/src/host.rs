@@ -7186,6 +7186,35 @@ fn record_layers(
     }
 }
 
+#[cfg(feature = "diagnostics")]
+fn capture_composed(
+    device: &ID3D12Device,
+    list: &ID3D12GraphicsCommandList,
+    back: &ID3D12Resource,
+    wanted: bool,
+) -> Option<(ID3D12Resource, D3D12_PLACED_SUBRESOURCE_FOOTPRINT)> {
+    if !wanted {
+        return None;
+    }
+    // The compositor leaves the back buffer in PRESENT; preserve that state.
+    unsafe {
+        list.ResourceBarrier(&[transition(
+            back,
+            D3D12_RESOURCE_STATE_PRESENT,
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+        )]);
+    }
+    let read = crate::capture::read_back(device, list, back);
+    unsafe {
+        list.ResourceBarrier(&[transition(
+            back,
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_PRESENT,
+        )]);
+    }
+    read
+}
+
 #[cfg(test)]
 mod layer_tests {
     use super::{fractions, texels};
@@ -7204,6 +7233,112 @@ mod layer_tests {
             (true, DXGI_FORMAT_D16_UNORM),
         ] {
             super::PlanePass::make(steps, format).expect("depth plane pipeline");
+        }
+    }
+
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn composed_frame_readback_contains_both_layers() {
+        use super::*;
+        let host = host().expect("host GPU");
+        let texture = |state| {
+            let heap = D3D12_HEAP_PROPERTIES {
+                Type: D3D12_HEAP_TYPE_DEFAULT,
+                ..Default::default()
+            };
+            let desc = D3D12_RESOURCE_DESC {
+                Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+                Width: 4,
+                Height: 4,
+                DepthOrArraySize: 1,
+                MipLevels: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Flags: D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                ..Default::default()
+            };
+            let mut resource = None;
+            // SAFETY: synthetic render targets retained until the queue finishes.
+            unsafe {
+                host.device
+                    .CreateCommittedResource(
+                        &heap,
+                        D3D12_HEAP_FLAG_NONE,
+                        &desc,
+                        state,
+                        None,
+                        &mut resource,
+                    )
+                    .unwrap();
+            }
+            resource.unwrap()
+        };
+        let red = texture(D3D12_RESOURCE_STATE_RENDER_TARGET);
+        let blue = texture(D3D12_RESOURCE_STATE_RENDER_TARGET);
+        let back = texture(D3D12_RESOURCE_STATE_PRESENT);
+        let commands = host.new_list().unwrap();
+        // SAFETY: open list and live render targets.
+        unsafe {
+            commands.list.ClearRenderTargetView(
+                host.rtv(Some(&red), None),
+                &[1.0, 0.0, 0.0, 1.0],
+                None,
+            );
+            commands.list.ClearRenderTargetView(
+                host.rtv(Some(&blue), None),
+                &[0.0, 0.0, 1.0, 1.0],
+                None,
+            );
+        }
+        let layers = [
+            Layer {
+                texture: &red,
+                state: D3D12_RESOURCE_STATE_RENDER_TARGET.0 as u32,
+                source: None,
+                place: None,
+            },
+            Layer {
+                texture: &blue,
+                state: D3D12_RESOURCE_STATE_RENDER_TARGET.0 as u32,
+                source: None,
+                place: Some([0.5, 0.0, 1.0, 1.0]),
+            },
+        ];
+        record_layers(
+            host,
+            &commands.list,
+            &back,
+            &layers,
+            (4, 4, DXGI_FORMAT_R8G8B8A8_UNORM),
+        );
+        assert!(capture_composed(&host.device, &commands.list, &back, false).is_none());
+        let (buffer, footprint) =
+            capture_composed(&host.device, &commands.list, &back, true).expect("readback");
+        commands.close();
+        host.execute(&[&commands]);
+        // SAFETY: execution completed and the mapped buffer contains the footprint.
+        unsafe {
+            let mut data = std::ptr::null_mut();
+            buffer.Map(0, None, Some(&mut data)).unwrap();
+            let rows =
+                std::slice::from_raw_parts(data.cast::<u8>(), buffer.GetDesc().Width as usize);
+            for y in 0..4 {
+                for x in 0..4 {
+                    let at = footprint.Offset as usize
+                        + y * footprint.Footprint.RowPitch as usize
+                        + x * 4;
+                    let expected = if x < 2 {
+                        [255, 0, 0, 255]
+                    } else {
+                        [0, 0, 255, 255]
+                    };
+                    assert_eq!(&rows[at..at + 4], &expected, "pixel {x},{y}");
+                }
+            }
+            buffer.Unmap(0, None);
         }
     }
 
@@ -7684,6 +7819,12 @@ impl Host {
                 ]);
             } else {
                 record_layers(self, list, &back, layers, (width, height, format));
+                #[cfg(feature = "diagnostics")]
+                {
+                    seen.0 = capture_composed(
+                        &self.device, list, &back, crate::capture::wanted(frame),
+                    );
+                }
             }
             #[cfg(feature = "diagnostics")]
             let (capture, probe) = seen;

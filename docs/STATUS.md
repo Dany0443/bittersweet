@@ -27,7 +27,7 @@ Further tests with GE-Proton11-14 (vkd3d-proton revision
 GE-Proton11-12. Explicit root signatures repair the memory-comparison,
 simple-scaling and output-packing helpers under Wine. With
 `VICTORY_FFX_SIMPLE=1`, runs on 2026-11-26 presented changing 3D scenes
-and overlaid credits. The packed-byte dot port raises host-pipeline creation from seven to 13
+and overlaid credits. The packed-byte dot port raises host-pipeline creation from seven to 14
 of 20 captured compute programs. The console upscaler remains incomplete;
 simple scaling has no temporal reconstruction. Lighting faults remain.
 
@@ -47,8 +47,17 @@ cold world loading, but large uploads, pipeline creation and memory
 pressure still produced multi-second frames. A later sample with no
 pipelines pending remained about 0.9 fps. No sustained title frame-rate
 improvement, player-controlled mission or corrected intro timing is
-established. A fresh window capture was unavailable because the title
-window was unmapped; the earlier visible-scene evidence remains separate.
+established. The prior window capture was unavailable because the title window was
+unmapped. Diagnostics now read back composed presentation as well as direct
+copies; a synthetic two-layer hardware test verifies both layer colors.
+The earlier visible-scene evidence remains separate.
+
+A prebuilt run reached world rendering with no pipelines pending and still
+ran around 0.7 to 1 fps. It stopped after 164 seconds with a RADV GPUVM
+read fault and device removal. A breadcrumb-enabled diagnostic run
+continued for 422 seconds before being stopped manually without that
+fault, but was slower. The failure remains unresolved; this does not
+establish stability. The Proton build reports no D3D12 debug layer.
 
 ## What is missing
 
