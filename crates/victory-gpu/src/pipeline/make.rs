@@ -35,6 +35,8 @@ pub(crate) struct Pending {
     used: AtomicBool,
     /// When a worker began it ([`slow`]).
     begun: OnceLock<Instant>,
+    /// Total milliseconds draws have waited for this pipeline across all frames.
+    waited_ms: AtomicU64,
 }
 
 // SAFETY: D3D12 objects are free-threaded; the graphics state (whose input
@@ -69,6 +71,7 @@ impl Pending {
             made: OnceLock::new(),
             used: AtomicBool::new(false),
             begun: OnceLock::new(),
+            waited_ms: AtomicU64::new(0),
         }
     }
 
@@ -118,6 +121,21 @@ fn wait_budget() -> Duration {
             .unwrap_or(500);
         tracing::info!(millis, "host pipeline wait budget per frame");
         Duration::from_millis(millis)
+    })
+}
+
+/// Total waiting allowed for one pipeline over all frames (`VICTORY_PIPELINE_WAIT_CAP_MS`, 5000; 0: no cap).
+fn wait_cap_ms() -> u64 {
+    static CAP: OnceLock<u64> = OnceLock::new();
+    *CAP.get_or_init(|| {
+        match std::env::var("VICTORY_PIPELINE_WAIT_CAP_MS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+        {
+            Some(0) => u64::MAX,
+            Some(n) => n,
+            None => 5000,
+        }
     })
 }
 
@@ -212,6 +230,9 @@ fn wait(p: &Pending, frame: u64) {
     if budget.is_zero() || slow(p) {
         return;
     }
+    if p.waited_ms.load(Ordering::Relaxed) >= wait_cap_ms() {
+        return;
+    }
     // What was waited past the budget since the start, in milliseconds; the
     // second of each is the compute pipelines'.
     static LOADINGS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
@@ -252,6 +273,7 @@ fn wait(p: &Pending, frame: u64) {
     }
     drop(held);
     let waited = started.elapsed().min(left);
+    p.waited_ms.fetch_add(waited.as_millis() as u64, Ordering::Relaxed);
     let past = waited.saturating_sub(wait_budget());
     past_total.fetch_add(past.as_millis() as u64, Ordering::Relaxed);
     {

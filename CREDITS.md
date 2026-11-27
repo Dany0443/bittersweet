@@ -429,3 +429,10 @@ The adaptation preserves ordinary buffer offsets and routes both address
 words through graphics and compute bindings. Synthetic tests reproduce the
 previous zero address and verify the correction. This port does not enable
 the experimental structure builder or establish title ray-tracing results.
+
+## Per-pipeline wait cap
+
+The per-pipeline cumulative wait cap (`VICTORY_PIPELINE_WAIT_CAP_MS`, default
+5000 ms) is ported from `PastiiJay/klbf-lab` (`origin/beta-amd`, commit
+`4c79ac52728f29163a4bad807911838a9f1c9774`), preventing unbuilt pipelines
+from consuming the frame wait budget on every subsequent frame.
