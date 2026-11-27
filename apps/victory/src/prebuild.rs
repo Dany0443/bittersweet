@@ -3,6 +3,7 @@
 //! cache and host pipeline library the run reads (`<cache>/shaders`,
 //! `<cache>/pipelines`), so that a run compiles nothing the pack lists.
 //! Ported from upstream 9c58a1c onto this tree's pipeline library.
+//! `--early-only` restricts work to pipelines observed in earlier title runs.
 //!
 //! Each pack record becomes the creation stream the engine would hand the
 //! device (`victory_game::pipelines`), which goes through the run's own
@@ -62,7 +63,7 @@ const CRASHED_FILE: &str = "prebuild-crashed.txt";
 /// Pipelines made between two saves of the library, at most.
 const SAVE_EVERY: usize = 200;
 
-pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
+pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>, early_only: bool) -> Result<()> {
     let paths = crate::default_paths(paths)?;
     let threads = jobs.unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
     let started = Instant::now();
@@ -201,6 +202,9 @@ pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     let todo: Mutex<Vec<(bool, Job)>> = Mutex::new(Vec::new());
     each(&jobs, threads, |job| {
         with(job, &mut |p| match p {
+            Ok(p) if early_only && !pipeline::wanted_early(&p.key()) => {
+                skip("not used in a previous run".into())
+            }
             Ok(p) if done.contains(&p.key()) => drop(already.fetch_add(1, Ordering::Relaxed)),
             Ok(p) if crashed.contains(&p.key()) => skip("the host driver died on it in an earlier pre-build".into()),
             Ok(p) if suspects.contains(&p.key()) => lock(&first).push(job),
@@ -213,6 +217,9 @@ pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     todo.sort_by_key(|&(later, _)| later);
     let todo: Vec<Job> = todo.into_iter().map(|(_, job)| job).collect();
     let first = first.into_inner().unwrap_or_else(|e| e.into_inner());
+    if early_only {
+        println!("scope        previously used pipelines only");
+    }
     println!(
         "pipelines    {} in the pack, {} already pre-built, {} to make on {threads} threads",
         jobs.len(),
@@ -415,6 +422,33 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn early_only_requires_cached_pipeline_builds() {
+        use clap::Parser;
+        assert!(crate::Cli::try_parse_from(["victory", "translate", "--early-only"]).is_err());
+        assert!(
+            crate::Cli::try_parse_from(["victory", "translate", "--early-only", "--pipelines"])
+                .is_err()
+        );
+        let args = crate::Cli::try_parse_from([
+            "victory",
+            "translate",
+            "--cache",
+            "--pipelines",
+            "--early-only",
+        ])
+        .unwrap();
+        assert!(matches!(
+            args.command,
+            crate::Command::Translate {
+                cache: true,
+                pipelines: true,
+                early_only: true,
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn completed_entries_require_matching_translation_and_library() {
         let text = "library 100\ntranslator build-a\na\nb\n";

@@ -94,6 +94,9 @@ enum Command {
         /// pack (resumable; honours VICTORY_SKIP_PIPELINES).
         #[arg(long, requires = "pipelines", conflicts_with_all = ["validate", "list"])]
         cache: bool,
+        /// Only prebuild pipelines used by a previous title run.
+        #[arg(long, requires = "cache")]
+        early_only: bool,
     },
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
@@ -161,8 +164,9 @@ fn main() -> Result<()> {
             paths,
             jobs,
             cache: true,
+            early_only,
             ..
-        } => prebuild::run(paths, jobs),
+        } => prebuild::run(paths, jobs, early_only),
         #[cfg(windows)]
         Command::Translate {
             paths,

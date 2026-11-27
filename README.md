@@ -46,7 +46,14 @@ memory-constrained runs. Unset, the existing worker-count default applies.
 Offline pipeline prebuild completion records now require the same shader
 translation fingerprint as the runtime. Existing unversioned completion
 lists are rebuilt once; use the same executable and translation settings
-for prebuilding and running.
+for prebuilding and running. The Windows runtime can limit prebuilding
+to pipelines observed in a previous title run:
+
+```text
+victory.exe translate <shader-archive> <captured-shaders> --cache --pipelines --early-only --jobs 1
+```
+
+An empty observed list schedules no pipelines with `--early-only`.
 `VICTORY_DIRECT_COPY=1` opts into in-process title-memory copies under Wine.
 A vectored handler reports unreadable pages as copy failures and restores
 guard pages. The existing kernel-copy path remains the default.

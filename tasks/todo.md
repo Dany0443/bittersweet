@@ -104,3 +104,8 @@ the prebuild and title with matching settings, then compare cold pipeline
 waits, intro timing and memory pressure. Keep derived caches outside Git.
 Dependencies: current shader ports. Scope: small independent cache-identity
 and prebuild-selection changes, committed after focused verification.
+
+The `--early-only` CLI boundary passes focused tests. A manual integration
+check with an empty observed list scanned the local shader pack but
+scheduled and created zero pipelines. The normal observed-list prebuild
+and subsequent title comparison remain pending.
