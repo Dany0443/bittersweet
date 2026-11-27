@@ -1417,6 +1417,9 @@ impl<'a> Lower<'a> {
             }
         }
         let mut s = Shader::new(x.native.stage == HwStage::Ps);
+        if x.mesh_as_compute {
+            s.binding_space_base = super::MESH_COMPUTE_SPACE_BASE;
+        }
         s.inputs = x.inputs.clone();
         s.outputs = x.outputs.clone();
         let scalar: HashMap<Site, Address> = x.res.scalar.iter().copied().collect();

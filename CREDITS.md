@@ -500,6 +500,13 @@ The conversion, dispatch and draw each advance buffer state tracking at
 their command boundaries. A compiler-only regression test exercises Wine's
 HLSL compiler without creating a GPU device.
 
+### Mesh fallback register spaces
+
+Adapted the separate compute binding spaces from Marvisak/VIctory
+commit `4e73e71` (PR #961). The mesh program's compute form uses
+spaces 8 and 9 so its bindings can share a root signature with the
+pixel stage. Native shader bindings keep their original spaces.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from

@@ -15,6 +15,9 @@ pub const ROOT_CBV_SPACE: u32 = 1;
 /// Where a mesh program run as compute writes its outputs (`u0`..`u2`) and
 /// the fallback vertex shader reads them (`t0`..`t2`).
 pub const MESH_OUT_SPACE: u32 = 2;
+/// Offset for title bindings when the mesh program runs as compute.
+/// Compute root parameters have ALL visibility on the shared root signature.
+pub const MESH_COMPUTE_SPACE_BASE: u32 = 8;
 
 /// The root SRV `t<SLOT_STRIDES>` in [`ROOT_CBV_SPACE`] of a shader that
 /// reads buffers through descriptors it picks from the view heap at an
@@ -151,6 +154,7 @@ pub(crate) struct Shader {
     pub m: Module,
     pub t: Types,
     pub pixel: bool,
+    pub binding_space_base: u32,
     pub inputs: Vec<SigElement>,
     pub outputs: Vec<SigElement>,
     /// A mesh shader's per-primitive outputs.
@@ -229,6 +233,7 @@ impl Shader {
                 res_ret,
             },
             pixel,
+            binding_space_base: 0,
             inputs: Vec::new(),
             outputs: Vec::new(),
             prims: Vec::new(),
@@ -299,7 +304,7 @@ impl Shader {
         let bind = [
             self.m.i32(0),
             self.m.i32(0),
-            self.m.i32(USER_DATA_SPACE),
+            self.m.i32(self.binding_space_base + USER_DATA_SPACE),
             self.m.i8(2), // CBV
         ];
         let bind = self.m.aggregate(self.t.bind, &bind);
@@ -324,7 +329,7 @@ impl Shader {
             return h;
         }
         let r = self.m.i32(u32::from(slot));
-        let bind = [r, r, self.m.i32(ROOT_CBV_SPACE), self.m.i8(2)];
+        let bind = [r, r, self.m.i32(self.binding_space_base + ROOT_CBV_SPACE), self.m.i8(2)];
         let bind = self.m.aggregate(self.t.bind, &bind);
         let f = self.m.bool(false);
         let block = self.entry;
@@ -347,7 +352,7 @@ impl Shader {
             return h;
         }
         let r = self.m.i32(u32::from(slot));
-        let bind = [r, r, self.m.i32(ROOT_CBV_SPACE), self.m.i8(0)];
+        let bind = [r, r, self.m.i32(self.binding_space_base + ROOT_CBV_SPACE), self.m.i8(0)];
         let bind = self.m.aggregate(self.t.bind, &bind);
         let f = self.m.bool(false);
         let block = self.entry;
@@ -381,7 +386,7 @@ impl Shader {
             return h;
         }
         let r = self.m.i32(u32::from(slot));
-        let bind = [r, r, self.m.i32(ROOT_CBV_SPACE), self.m.i8(1)];
+        let bind = [r, r, self.m.i32(self.binding_space_base + ROOT_CBV_SPACE), self.m.i8(1)];
         let bind = self.m.aggregate(self.t.bind, &bind);
         let f = self.m.bool(false);
         let block = self.entry;
@@ -461,7 +466,7 @@ impl Shader {
         let bind = [
             self.m.i32(n),
             self.m.i32(n),
-            self.m.i32(SAMPLER_SPACE),
+            self.m.i32(self.binding_space_base + SAMPLER_SPACE),
             self.m.i8(3), // sampler
         ];
         let bind = self.m.aggregate(self.t.bind, &bind);
@@ -572,6 +577,7 @@ impl Shader {
                 }
             }
         }
+        let binding_space_base = self.binding_space_base;
         let mut resources = None;
         let mut bindings = Vec::new();
         let i32c = |s: &mut Self, v: u32| {
@@ -598,7 +604,7 @@ impl Shader {
                     Some(i32c(&mut self, 0)),
                     Some(self.m.md_value(u)),
                     Some(empty),
-                    Some(i32c(&mut self, USER_DATA_SPACE)),
+                    Some(i32c(&mut self, binding_space_base + USER_DATA_SPACE)),
                     Some(i32c(&mut self, 0)),
                     Some(i32c(&mut self, 1)),
                     Some(i32c(&mut self, ud_size)),
@@ -607,7 +613,7 @@ impl Shader {
                 cbv_list.push(Some(self.m.md_node(ops)));
                 bindings.push(Binding {
                     kind: 2,
-                    space: USER_DATA_SPACE,
+                    space: binding_space_base + USER_DATA_SPACE,
                     register: 0,
                     dxil_kind: 13,
                 });
@@ -621,7 +627,7 @@ impl Shader {
                     Some(i32c(&mut self, cbv_list.len() as u32)),
                     Some(self.m.md_value(u)),
                     Some(empty),
-                    Some(i32c(&mut self, ROOT_CBV_SPACE)),
+                    Some(i32c(&mut self, binding_space_base + ROOT_CBV_SPACE)),
                     Some(i32c(&mut self, u32::from(slot))),
                     Some(i32c(&mut self, 1)),
                     Some(i32c(&mut self, 65536)),
@@ -630,7 +636,7 @@ impl Shader {
                 cbv_list.push(Some(self.m.md_node(ops)));
                 bindings.push(Binding {
                     kind: 2,
-                    space: ROOT_CBV_SPACE,
+                    space: binding_space_base + ROOT_CBV_SPACE,
                     register: u32::from(slot),
                     dxil_kind: 13,
                 });
@@ -651,7 +657,7 @@ impl Shader {
                         Some(i32c(&mut self, n as u32)),
                         Some(self.m.md_value(u)),
                         Some(empty),
-                        Some(i32c(&mut self, ROOT_CBV_SPACE)),
+                        Some(i32c(&mut self, binding_space_base + ROOT_CBV_SPACE)),
                         Some(i32c(&mut self, u32::from(slot))),
                         Some(i32c(&mut self, 1)),
                         Some(i32c(&mut self, 11)),
@@ -661,7 +667,7 @@ impl Shader {
                     list.push(Some(self.m.md_node(ops)));
                     bindings.push(Binding {
                         kind: 4,
-                        space: ROOT_CBV_SPACE,
+                        space: binding_space_base + ROOT_CBV_SPACE,
                         register: u32::from(slot),
                         dxil_kind: 11,
                     });
@@ -713,7 +719,7 @@ impl Shader {
                         Some(i32c(&mut self, n as u32)),
                         Some(self.m.md_value(u)),
                         Some(empty),
-                        Some(i32c(&mut self, ROOT_CBV_SPACE)),
+                        Some(i32c(&mut self, binding_space_base + ROOT_CBV_SPACE)),
                         Some(i32c(&mut self, u32::from(slot))),
                         Some(i32c(&mut self, 1)),
                         Some(i32c(&mut self, 11)),
@@ -725,7 +731,7 @@ impl Shader {
                     list.push(Some(self.m.md_node(ops)));
                     bindings.push(Binding {
                         kind: 7,
-                        space: ROOT_CBV_SPACE,
+                        space: binding_space_base + ROOT_CBV_SPACE,
                         register: u32::from(slot),
                         dxil_kind: 11,
                     });
@@ -769,7 +775,7 @@ impl Shader {
                         Some(i32c(&mut self, n)),
                         Some(self.m.md_value(u)),
                         Some(empty),
-                        Some(i32c(&mut self, SAMPLER_SPACE)),
+                        Some(i32c(&mut self, binding_space_base + SAMPLER_SPACE)),
                         Some(i32c(&mut self, n)),
                         Some(i32c(&mut self, 1)),
                         // Sampler kind: 1 comparison.
@@ -779,7 +785,7 @@ impl Shader {
                     list.push(Some(self.m.md_node(ops)));
                     bindings.push(Binding {
                         kind: 1,
-                        space: SAMPLER_SPACE,
+                        space: binding_space_base + SAMPLER_SPACE,
                         register: n,
                         dxil_kind: 14,
                     });

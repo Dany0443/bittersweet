@@ -123,7 +123,7 @@ pub use lower::{
 };
 pub use rect::rect_list_gs;
 pub use shader::{
-    MEMORY_FAULTS, MEMORY_PAGES, MESH_OUT_SPACE, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS,
+    MEMORY_FAULTS, MEMORY_PAGES, MESH_COMPUTE_SPACE_BASE, MESH_OUT_SPACE, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS,
     SLOT_MEMORY, SLOT_STRIDES, SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_GROUP_BASE,
     USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS, VIEW_INTEGER, VIEW_SIGNED,
     VIEW_STRIDE_BITS, set_view_heap_limit, view_heap_limit,
@@ -1751,6 +1751,40 @@ mod tests {
 mod mesh_as_compute_tests {
     use super::*;
     use crate::native::{MeshIo, StageIo};
+
+    #[test]
+    fn fallback_title_bindings_do_not_overlap_pixel_bindings() {
+        for (base, pixel) in [(MESH_COMPUTE_SPACE_BASE, false), (0, true)] {
+            let mut shader = shader::Shader::new(pixel);
+            shader.binding_space_base = base;
+            if !pixel {
+                shader.threads = Some([32, 1, 1]);
+            }
+            shader.user_data = 4;
+            shader.samplers = 1;
+            shader.user_data_handle();
+            shader.root_cbv_handle(3);
+            shader.root_srv_handle(4);
+            shader.root_uav_handle(5);
+            shader.sampler_handle(shader.entry, 0);
+            shader.m.terminate(shader.entry, bitcode::Term::Ret);
+            let bytes = shader.finish();
+            let container = Container::parse(&bytes).unwrap();
+            let psv = container.part(FourCC::PSV0).unwrap().data;
+            let word = |offset| crate::dxbc::u32_at(psv, offset).unwrap();
+            let mut bindings: Vec<_> = (0..word(52) as usize)
+                .map(|i| {
+                    let offset = 60 + i * word(56) as usize;
+                    (word(offset + 4), word(offset + 8))
+                })
+                .collect();
+            bindings.sort_unstable();
+            assert_eq!(
+                bindings,
+                [(base, 0), (base, 0), (base + 1, 3), (base + 1, 4), (base + 1, 5)]
+            );
+        }
+    }
 
     #[test]
     fn fallback_emits_compute_dxil_and_native_mesh_keeps_mesh_dxil() {

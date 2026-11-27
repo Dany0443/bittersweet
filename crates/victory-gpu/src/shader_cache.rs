@@ -361,7 +361,7 @@ pub(crate) fn mesh_fallback(container: &[u8]) -> Result<MeshFallback, String> {
 struct FallbackTranslate(AtomicBool);
 impl Converter for FallbackTranslate {
     fn id(&self) -> &'static str { "shader.mesh-fallback" }
-    fn version(&self) -> u32 { 1 }
+    fn version(&self) -> u32 { 2 }
     fn convert(&self, input: &[u8]) -> anyhow::Result<Vec<u8>> {
         self.0.store(true, Ordering::Relaxed);
         let fallback = victory_shader::emit::translate_mesh_as_compute(&input[32..]).map_err(|e| anyhow::anyhow!(e.to_string()))?;

@@ -8,7 +8,9 @@
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 
-use victory_shader::emit::{MESH_OUT_SPACE, ROOT_CBV_SPACE, SAMPLER_SPACE, USER_DATA_SPACE};
+use victory_shader::emit::{
+    MESH_COMPUTE_SPACE_BASE, MESH_OUT_SPACE, ROOT_CBV_SPACE, SAMPLER_SPACE, USER_DATA_SPACE,
+};
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
@@ -433,6 +435,7 @@ impl HostPipeline {
                 if fallback.compute.user_data != translated.host.user_data
                     || fallback.compute.root_cbvs != translated.host.root_cbvs
                     || fallback.compute.root_srvs != translated.host.root_srvs
+                    || fallback.compute.root_uavs != translated.host.root_uavs
                     || fallback.compute.static_samplers != translated.host.static_samplers
                 {
                     return refuse("mesh program bindings change in compute fallback", shaders);
@@ -472,7 +475,12 @@ impl HostPipeline {
         let mut bound = Vec::new();
         let mut mesh_out = None;
         for &(shader, visibility) in &stages {
-            let t = &shader.translated()?.host;
+            let (t, binding_space_base) = match mesh_fallback {
+                Some(fallback) if shader.stage == "mesh" => {
+                    (&fallback.compute, MESH_COMPUTE_SPACE_BASE)
+                }
+                _ => (&shader.translated()?.host, 0),
+            };
             let mut stage = Stage {
                 shader: shader.clone(),
                 user_data: None,
@@ -488,7 +496,7 @@ impl HostPipeline {
                     Anonymous: D3D12_ROOT_PARAMETER1_0 {
                         Constants: D3D12_ROOT_CONSTANTS {
                             ShaderRegister: 0,
-                            RegisterSpace: USER_DATA_SPACE,
+                            RegisterSpace: binding_space_base + USER_DATA_SPACE,
                             Num32BitValues: dwords,
                         },
                     },
@@ -539,7 +547,7 @@ impl HostPipeline {
                             },
                             NumDescriptors: 1,
                             BaseShaderRegister: u32::from(slot),
-                            RegisterSpace: ROOT_CBV_SPACE,
+                            RegisterSpace: binding_space_base + ROOT_CBV_SPACE,
                             Flags: D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE
                                 | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE,
                             OffsetInDescriptorsFromTableStart: 0,
@@ -564,7 +572,7 @@ impl HostPipeline {
                         Anonymous: D3D12_ROOT_PARAMETER1_0 {
                             Descriptor: D3D12_ROOT_DESCRIPTOR1 {
                                 ShaderRegister: u32::from(slot),
-                                RegisterSpace: ROOT_CBV_SPACE,
+                                RegisterSpace: binding_space_base + ROOT_CBV_SPACE,
                                 Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
                             },
                         },
@@ -585,7 +593,7 @@ impl HostPipeline {
                     MinLOD: s.min_lod,
                     MaxLOD: s.max_lod,
                     ShaderRegister: n as u32,
-                    RegisterSpace: SAMPLER_SPACE,
+                    RegisterSpace: binding_space_base + SAMPLER_SPACE,
                     ShaderVisibility: visibility,
                 });
             }
