@@ -30,6 +30,12 @@ Shaders are translated when the title creates a pipeline, from the bytes it
 passes, wherever it loaded them from (executable, archive, memory).
 Converting them ahead of time from files is only a warm-up.
 
+Title-memory window reuse is opt-in through `VICTORY_WINDOW_REUSE=1`.
+The window cache owns each GPU copy once and keeps requested-range aliases
+in a separate index. Retirement and in-place invalidation remove stale
+aliases under the same cache lock; descriptors retain the buffer identity
+selected for their range.
+
 ## Crates
 
 | Crate | Role |

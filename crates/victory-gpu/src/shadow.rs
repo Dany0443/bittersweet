@@ -1506,6 +1506,7 @@ pub(crate) fn windows() -> [u64; 3] {
     let asked: u64 = {
         let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
         loose
+            .copies
             .values()
             .map(|s| {
                 let low = s.asked[0].load(Ordering::Relaxed);
@@ -1529,7 +1530,7 @@ pub(crate) fn windows() -> [u64; 3] {
 pub(crate) fn window_use() -> [u64; 8] {
     let mut out = [0u64; 8];
     let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-    for s in loose.values() {
+    for s in loose.copies.values() {
         let copied = s.copied.lock().unwrap_or_else(|e| e.into_inner());
         let pages = copied.iter().filter(|&&at| at != 0).count() as u64;
         out[0] += (pages * PAGE as u64).min(s.len);
@@ -1570,11 +1571,12 @@ pub(crate) fn let_go_idle() {
         // Held from the look to the removal: `loose` hands a copy out
         // under the same lock, so none is handed out in between.
         let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-        if map.is_empty() {
+        if map.copies.is_empty() {
             return;
         }
         let idle_ms = crate::host::ram_idle_ms(crate::host::available_physical_ram());
         let idle: Vec<(u64, u64)> = map
+            .copies
             .iter()
             .filter(|(_, s)| {
                 Arc::strong_count(s) == 1
@@ -1583,7 +1585,12 @@ pub(crate) fn let_go_idle() {
             })
             .map(|(key, _)| *key)
             .collect();
-        idle.into_iter().filter_map(|key| map.remove(&key)).collect()
+        let gone = idle
+            .into_iter()
+            .filter_map(|key| map.copies.remove(&key))
+            .collect();
+        map.prune_aliases();
+        gone
     };
     if !gone.is_empty() {
         let (went, bytes) = (gone.len(), gone.iter().map(|s| s.len).sum::<u64>());
@@ -1610,6 +1617,7 @@ pub(crate) fn memory() -> [u64; 6] {
         // Each copy once: a window may stand under several keys.
         let mut seen = std::collections::HashSet::new();
         let bytes: u64 = loose
+            .copies
             .values()
             .filter(|s| seen.insert(Arc::as_ptr(s) as usize))
             .map(|s| s.len)
@@ -2700,11 +2708,13 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
     {
         let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
         let keys: Vec<(u64, u64)> = map
-            .range((at.saturating_sub(WINDOW), 0)..(end, 0))
+            .copies
+            .range((at.saturating_sub(map.longest), 0)..(end, 0))
             .filter(|(key, shadow)| shadow.place.is_some() && key.0 + key.1 > at)
             .map(|(key, _)| *key)
             .collect();
-        gone.extend(keys.into_iter().filter_map(|key| map.remove(&key)));
+        gone.extend(keys.into_iter().filter_map(|key| map.copies.remove(&key)));
+        map.prune_aliases();
     }
     {
         // As `lookup` finds a buffer: among the 256 that start below.
@@ -2728,7 +2738,7 @@ pub(crate) fn in_place_let_go(at: u64, len: u64) -> u64 {
 pub(crate) fn spans() -> Vec<(u64, u64, bool)> {
     let mut spans: Vec<(u64, u64, bool)> = buffers().iter().map(|(key, entry)| (key.0, entry.end - key.0, false)).collect();
     let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-    spans.extend(loose.keys().map(|&(start, len)| (start, len, true)));
+    spans.extend(loose.copies.keys().map(|&(start, len)| (start, len, true)));
     spans
 }
 
@@ -2944,7 +2954,7 @@ fn fine() -> bool {
 #[cfg(feature = "diagnostics")]
 pub(crate) fn window_cover() -> u64 {
     let loose = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
-    cover(loose.keys().copied())
+    cover(loose.copies.keys().copied())
 }
 
 /// The bytes `windows` (start, bytes; in order of start) lie over, each
@@ -2973,21 +2983,80 @@ fn longest_tail(windows: impl Iterator<Item = (u64, u64)>, address: u64, end: u6
         .min()
 }
 
-/// Copies of title memory outside buffers, by (start, length).
-static LOOSE: Mutex<BTreeMap<(u64, u64), Arc<Shadow>>> = Mutex::new(BTreeMap::new());
+fn window_reuse() -> bool {
+    static REUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *REUSE.get_or_init(|| std::env::var_os("VICTORY_WINDOW_REUSE").is_some_and(|v| v == "1"))
+}
+
+// Aliases do not retain extra GPU buffer ownership.
+struct WindowCache<T> {
+    copies: BTreeMap<(u64, u64), Arc<T>>,
+    aliases: BTreeMap<(u64, u64), (u64, u64)>,
+    longest: u64,
+}
+
+impl<T> WindowCache<T> {
+    const fn new() -> Self {
+        Self {
+            copies: BTreeMap::new(),
+            aliases: BTreeMap::new(),
+            longest: WINDOW,
+        }
+    }
+
+    fn named(&mut self, key: (u64, u64), reuse: bool) -> Option<Arc<T>> {
+        let target = self.aliases.get(&key).copied().unwrap_or(key);
+        if let Some(copy) = self.copies.get(&target) {
+            return Some(copy.clone());
+        }
+        if !reuse {
+            return None;
+        }
+        let end = key.0.checked_add(key.1)?;
+        let from = key.0.saturating_sub(self.longest);
+        let candidates = self
+            .copies
+            .range((from, 0)..=(key.0, u64::MAX))
+            .map(|(&k, _)| k);
+        let target = holder(candidates, key.0, end)?;
+        self.aliases.insert(key, target);
+        self.copies.get(&target).cloned()
+    }
+
+    fn insert(&mut self, key: (u64, u64), copy: Arc<T>) {
+        self.aliases.remove(&key);
+        self.longest = self.longest.max(key.1);
+        self.copies.insert(key, copy);
+    }
+
+    fn prune_aliases(&mut self) {
+        self.aliases
+            .retain(|_, target| self.copies.contains_key(target));
+    }
+}
+
+static LOOSE: Mutex<WindowCache<Shadow>> = Mutex::new(WindowCache::new());
 
 fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Shadow>> {
     let mut map = LOOSE.lock().unwrap_or_else(|e| e.into_inner());
     let (cell, _) = window_of(address, end, WINDOW);
     let named = window_of(address, end, if unsized_ask { WINDOW } else { window() });
     let (start, len) = if unsized_ask && tails() {
-        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+        let there = map
+            .copies
+            .range((cell, 0)..=(address, u64::MAX))
+            .map(|(key, _)| *key);
         longest_tail(there, address, end).unwrap_or_else(|| tail_of(address, end))
     } else if any && fine() && !unsized_ask {
-        // The windows that begin in the ask's cell at or below the ask (one
-        // that begins in a cell below and reaches this far is passed over:
-        // the ask then makes its own).
-        let there = map.range((cell, 0)..=(address, u64::MAX)).map(|(key, _)| *key);
+        let from = if window_reuse() {
+            address.saturating_sub(map.longest)
+        } else {
+            cell
+        };
+        let there = map
+            .copies
+            .range((from, 0)..=(address, u64::MAX))
+            .map(|(key, _)| *key);
         holder(there, address, end).unwrap_or(named)
     } else {
         named
@@ -3001,9 +3070,18 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
             shadow.unsized_asks.fetch_add(1, Ordering::Relaxed);
         }
     };
-    if let Some(shadow) = map.get(&(start, len)) {
-        note(shadow);
-        return Some(shadow.clone());
+    let aliases = map.aliases.len();
+    if let Some(shadow) = map.named((start, len), window_reuse() && !unsized_ask && !any) {
+        if map.aliases.len() != aliases && map.aliases.len().is_power_of_two() {
+            let avoided: u64 = map.aliases.keys().map(|key| key.1).sum();
+            tracing::info!(
+                aliases = map.aliases.len(),
+                avoided_mb = avoided >> 20,
+                "loose windows reuse existing buffers (VICTORY_WINDOW_REUSE=1)"
+            );
+        }
+        note(&shadow);
+        return Some(shadow);
     }
     // In place, if asked for and the window's memory can be opened: the
     // window is the title's own memory, with nothing to copy.
@@ -3019,7 +3097,9 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
     // buffer there, and the one just made is the CPU's side.
     let (buffer, card) = match window_card_for(len) {
         Some(on_card) => {
-            crate::host::name(&on_card, || format!("title memory {start:#x}+{len:#x} on the card"));
+            crate::host::name(&on_card, || {
+                format!("title memory {start:#x}+{len:#x} on the card")
+            });
             let card = Card {
                 staging: buffer,
                 before: Mutex::default(),
@@ -3043,7 +3123,10 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
     shadow.card = card;
     let shadow = Arc::new(shadow);
     if shadow.card.is_some() {
-        CARDED.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&shadow));
+        CARDED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(Arc::downgrade(&shadow));
     }
     note(&shadow);
     map.insert((start, len), shadow.clone());
@@ -3053,6 +3136,50 @@ fn loose(address: u64, end: u64, unsized_ask: bool, any: bool) -> Option<Arc<Sha
 #[cfg(test)]
 mod window_tests {
     use super::{WINDOW, cover, grid, holder, longest_tail, tail_of, window_of};
+
+    #[test]
+    fn named_windows_reuse_covering_copies_and_keep_their_identity() {
+        use super::WindowCache;
+        use std::sync::Arc;
+        let mut cache = WindowCache::new();
+        let broad = Arc::new(1u32);
+        cache.insert((0x1000, 0x8000), broad.clone());
+        let small = (0x3000, 0x1000);
+        let found = cache.named(small, true).expect("reuse a covering window");
+        assert!(Arc::ptr_eq(&found, &broad));
+        cache.insert((0, 0x10000), Arc::new(2));
+        assert!(Arc::ptr_eq(&cache.named(small, true).unwrap(), &broad));
+        assert_eq!(cache.copies.len(), 2);
+        assert_eq!(cache.aliases.len(), 1);
+        drop(found);
+        assert_eq!(Arc::strong_count(&broad), 2, "aliases do not own copies");
+        let alive = Arc::downgrade(&broad);
+        drop(broad);
+        assert_eq!(Arc::strong_count(cache.copies.get(&(0x1000, 0x8000)).unwrap()), 1);
+        cache.copies.remove(&(0x1000, 0x8000));
+        cache.prune_aliases();
+        assert!(cache.aliases.is_empty());
+        assert!(cache.named(small, false).is_none());
+        assert!(alive.upgrade().is_none());
+    }
+
+    #[test]
+    fn named_windows_only_alias_complete_ranges_when_enabled() {
+        use super::WindowCache;
+        use std::sync::Arc;
+        let mut cache = WindowCache::new();
+        let broad = Arc::new(7u32);
+        cache.insert((0x1000, 3 * WINDOW), broad.clone());
+        let crossing = (0x1000 + 2 * WINDOW, 0x10000);
+        assert!(cache.named(crossing, false).is_none());
+        assert!(Arc::ptr_eq(&cache.named(crossing, true).unwrap(), &broad));
+        assert!(Arc::ptr_eq(&cache.named(crossing, false).unwrap(), &broad));
+        assert!(cache.named((0, 0x2000), true).is_none());
+        assert!(cache.named((0x1000 + 3 * WINDOW - 16, 32), true).is_none());
+        assert!(cache.named((u64::MAX - 2, 8), true).is_none());
+        assert_eq!(cache.aliases.len(), 1);
+        assert_eq!(cache.copies.len(), 1);
+    }
 
     /// An ask that may take any window takes the longest that holds all of
     /// it, and none that holds only a part.
@@ -3167,6 +3294,7 @@ pub(crate) fn near(va: u64) -> String {
         LOOSE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .copies
             .values()
             .map(|s| (s.gpu, s.start, s.len)),
     );

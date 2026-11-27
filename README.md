@@ -86,6 +86,9 @@ saves default to the external Wine prefix; see
 To update, run `git pull --ff-only` and repeat the build command. For host
 checks without starting the title, run `cargo run -p bittersweet -- doctor`.
 
+Experimental: `VICTORY_WINDOW_REUSE=1` reuses overlapping buffer copies.
+It stays off by default while memory use and rendering are compared.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·

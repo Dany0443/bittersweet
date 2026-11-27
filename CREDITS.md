@@ -463,3 +463,13 @@ originally authored by codec_d. This port reuses bittersweet's list-owned
 upload buffers and conservative submission callbacks. A synthetic GPU
 readback test covers changed frames after unchanged frames. The user subsequently
 confirmed smooth intro playback and main-menu arrival under Proton.
+
+### Reuse of overlapping title-memory windows
+
+Adapted the key-aliasing technique from
+[fxceless/victory-fork PR 1362](https://github.com/fxceless/victory-fork/pull/1362),
+head `74cc91f397a56d242abda703e4201ea9b1cf0c89`.
+Bittersweet keeps aliases in a separate index so they do not retain GPU
+buffers or change the existing idle-retirement ownership checks. This port
+covers lookup reuse, canonical accounting and alias invalidation; it does
+not add the PR's immediate reclamation of superseded windows.
