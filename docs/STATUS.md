@@ -4,6 +4,32 @@ This page records the current, locally verified state of the Linux/Proton
 effort. External project status is not tracked in this repository; agents
 should research current upstream sources when a task depends on them.
 
+## Latest validation: 2026-11-27
+
+The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
+PR #139. The corrected lowering passes GPU readback checks for signed and
+unsigned min/max, zero, equal operands and selected values under Proton.
+
+Shared texture-address tables from DexNom PR #118 retain byte-identical
+addressing and pass concurrent sharing and texture round-trip tests. In a
+synthetic 10,000-layout construction/clone benchmark, requested allocations
+fell from 15.72 MB to 4.96 MB and construction time from 10.27 to 10.71 ms
+to 2.25 to 2.49 ms across three runs per version. These are allocation and
+construction measurements, not gameplay frame rates.
+
+The newly fetched mesh fallback needed Linux adaptation: Wine's compiler
+rejects raw UAV loads. Structured dword accesses and an explicit root
+signature now pass five indirect-mesh tests under Proton, including indexed
+and expanded output, count limits and 64-bit address carry. This tests the
+converter on the RX 7600; RX 5700 world rendering remains unverified.
+
+A controlled buffer-window reuse trial with the restricted draw lookup
+reached world rendering at roughly 2 to 3 fps. The monitor stopped it after
+99 seconds at 944 MiB available RAM and no free swap. No GPU fault was
+observed before that stop. It establishes neither a performance gain nor
+stability; reuse stays off by default. Stable 20 to 30 fps with complete
+textures and objects remains unachieved.
+
 ## What works today
 
 | Area | State |
@@ -16,7 +42,7 @@ should research current upstream sources when a task depends on them.
 | Windows runtime | Windows-target release cross-builds on Linux; account/player prompt rendered under GE-Proton11-12 |
 | First mission | Not verified; simple scaling presents changing 3D and composed credits, but frame times remain far above the target |
 
-Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
+Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600,
 Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
 account/player prompt rendered after the presentation fixes. Synthetic GPU
 tests under Proton create both compositor and both depth-helper pipelines.
