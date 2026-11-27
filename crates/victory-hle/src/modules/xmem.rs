@@ -8,7 +8,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use std::alloc::{Layout, alloc, dealloc};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
@@ -370,6 +370,55 @@ struct Physical {
     pages: HashMap<usize, Slice>,
     /// Mapped views by address: their length and what they show.
     views: BTreeMap<usize, (usize, Slice)>,
+    /// Location by section identity, page index, and view address.
+    page_views: BTreeSet<(usize, usize, usize)>,
+}
+
+impl Physical {
+    fn remember_view(&mut self, base: usize, len: usize, slice: Slice) {
+        self.forget_view(base);
+        let section = Arc::as_ptr(&slice.section) as usize;
+        for (page, offset) in (0..len).step_by(PAGE).enumerate() {
+            self.page_views
+                .insert((section, slice.index + page, base + offset));
+        }
+        self.views.insert(base, (len, slice));
+    }
+
+    fn forget_view(&mut self, base: usize) -> Option<(usize, Slice)> {
+        let (len, slice) = self.views.remove(&base)?;
+        let section = Arc::as_ptr(&slice.section) as usize;
+        for (page, offset) in (0..len).step_by(PAGE).enumerate() {
+            self.page_views
+                .remove(&(section, slice.index + page, base + offset));
+        }
+        Some((len, slice))
+    }
+
+    fn for_page_views(
+        &self,
+        slice: &Slice,
+        within: usize,
+        len: usize,
+        mut notify: impl FnMut(usize, usize),
+    ) {
+        let section = Arc::as_ptr(&slice.section) as usize;
+        let mut left = len;
+        let mut page = slice.index;
+        let mut offset = within;
+        while left > 0 {
+            let bytes = (PAGE - offset).min(left);
+            for &(_, _, address) in self
+                .page_views
+                .range((section, page, 0)..=(section, page, usize::MAX))
+            {
+                notify(address + offset, bytes);
+            }
+            left -= bytes;
+            page += 1;
+            offset = 0;
+        }
+    }
 }
 
 static PHYSICAL: LazyLock<Mutex<Physical>> = LazyLock::new(|| {
@@ -573,11 +622,7 @@ impl PageRuns {
         let [(slice, n)] = self.runs.as_slice() else {
             return None;
         };
-        Some(PageWindow {
-            view: View::map(slice, *n)?,
-            within: self.within,
-            len: self.len,
-        })
+        PageWindow::map(slice, *n, self.within, self.len)
     }
 
     /// Copies `data` (at most `len` bytes) in. False if the host fails.
@@ -587,11 +632,11 @@ impl PageRuns {
             if done == data.len() {
                 break;
             }
-            let Some(mut view) = View::map(slice, *n) else {
+            let k = (n * PAGE - within).min(data.len() - done);
+            let Some(mut window) = PageWindow::map(slice, *n, within, k) else {
                 return false;
             };
-            let k = (n * PAGE - within).min(data.len() - done);
-            view.bytes()[within..within + k].copy_from_slice(&data[done..done + k]);
+            window.bytes().copy_from_slice(&data[done..done + k]);
             (within, done) = (0, done + k);
         }
         true
@@ -603,14 +648,37 @@ impl PageRuns {
 /// would then copy.
 pub(crate) struct PageWindow {
     view: View,
+    slice: Slice,
     within: usize,
     len: usize,
 }
 
 impl PageWindow {
+    fn map(slice: &Slice, pages: usize, within: usize, len: usize) -> Option<Self> {
+        let view = View::map(slice, pages)?;
+        physical().for_page_views(slice, within, len, victory_gpu::open_title_memory_for_write);
+        Some(Self {
+            view,
+            slice: slice.clone(),
+            within,
+            len,
+        })
+    }
+
     pub(crate) fn bytes(&mut self) -> &mut [u8] {
         let (within, len) = (self.within, self.len);
         &mut self.view.bytes()[within..within + len]
+    }
+}
+
+impl Drop for PageWindow {
+    fn drop(&mut self) {
+        physical().for_page_views(
+            &self.slice,
+            self.within,
+            self.len,
+            victory_gpu::title_memory_written,
+        );
     }
 }
 
@@ -777,7 +845,7 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
     victory_gpu::title_memory_remapped(base, len);
     // What the range shows now, for the GPU side's in-place census.
     victory_gpu::title_memory_view(base, len, slice.section.0 as usize, (slice.index * PAGE) as u64);
-    physical.views.insert(base, (len, slice));
+    physical.remember_view(base, len, slice);
     true
 }
 
@@ -875,7 +943,7 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
         .chain(physical.views.range(base + 1..end).map(|(at, _)| *at))
         .collect();
     for at in hit {
-        let Some((size, slice)) = physical.views.remove(&at) else {
+        let Some((size, slice)) = physical.forget_view(at) else {
             continue;
         };
         victory_gpu::title_memory_remapped(at, size);
@@ -1156,6 +1224,23 @@ mod tests {
             XMemMapPhysicalPages(at(b, 1), 1, pages[2..].as_ptr()),
             at(b, 1)
         );
+        let notifications = || {
+            let physical = physical();
+            let slice = &physical.pages[&pages[1]];
+            let mut ranges = Vec::new();
+            physical.for_page_views(slice, PAGE - 2, 5, |address, len| {
+                ranges.push((address, len));
+            });
+            ranges.sort_unstable();
+            ranges
+        };
+        let mut expected = vec![
+            (at(a, 2) as usize - 2, 2),
+            (at(a, 2) as usize, 3),
+            (at(b, 1) as usize, 3),
+        ];
+        expected.sort_unstable();
+        assert_eq!(notifications(), expected);
         // SAFETY: both pages are mapped read-write.
         unsafe {
             at(a, 2).cast::<u8>().write(7);
@@ -1175,6 +1260,8 @@ mod tests {
         assert_eq!(query(at(a, 1)).host.State, MEM_RESERVE);
         assert_eq!(query(a).host.State, MEM_COMMIT);
         assert_eq!(query(at(a, 2)).host.State, MEM_COMMIT);
+        expected.retain(|&(address, _)| address != at(a, 2) as usize - 2);
+        assert_eq!(notifications(), expected);
         // SAFETY: still mapped.
         assert_eq!(unsafe { at(a, 2).cast::<u8>().read() }, 7);
 

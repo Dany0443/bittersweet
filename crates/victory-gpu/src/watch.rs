@@ -646,10 +646,19 @@ fn open(g: &mut Guards, start: usize, end: usize) -> bool {
 /// The runtime calls it (as `kernel_will_write`) before the title's kernel
 /// reads into its own memory.
 pub fn writing(at: usize, len: usize) {
+    title_memory_written(at, len);
+}
+
+/// Marks the range dirty for guarded buffers and placed textures.
+pub fn title_memory_written(at: usize, len: usize) {
+    open_title_memory_for_write(at, len);
+    crate::descriptor::host::remapped(at, len);
+}
+
+/// Opens guards before a write whose completion is reported separately.
+pub fn open_title_memory_for_write(at: usize, len: usize) {
     // The length is the title's (`fread`'s size times count, saturated).
     open(&mut guards(), at, at.saturating_add(len));
-    // A placed texture there changes with no descriptor written.
-    crate::descriptor::host::remapped(at, len);
 }
 
 /// Held shared by a read of title memory in place, and alone by the runtime

@@ -49,6 +49,9 @@ descriptions it cannot read and shaders it cannot translate.
 Each view heap tracks its position in a bounded texture remap history.
 If the history discards an unread range, that heap rechecks all its placed
 textures on its next pass.
+DirectStorage physical-page writes look up every mapped view of the
+destination pages. They open the write guards before decoding or copying
+and publish the changed view ranges when the write window closes.
 
 ## Crates
 

@@ -290,6 +290,12 @@ The `VICTORY_DSTORAGE_WORKERS` override follows LoverCatys/ruff-lab commit
 `bffe04b`. It lets users limit concurrent storage reads on rotational drives;
 unset or invalid values preserve the existing logical-processor default.
 
+## DirectStorage physical-page notifications
+
+The page-view notifications adapt [Scarlight PR #146](https://github.com/pablogonz12/Scarlight/pull/146),
+head `db2413d5d9bb070cf090982df7fc010c62850910`. This port uses the
+existing xmem mapping lock, write guards, and per-heap texture history.
+
 ## RAM pressure cache cleanup
 
 System-memory caches now become eligible for cleanup sooner when available RAM
