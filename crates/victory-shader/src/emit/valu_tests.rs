@@ -172,6 +172,61 @@ fn packed_signed_byte_dot_accumulates_and_wraps() {
     });
 }
 
+#[test]
+fn packed_byte_dots_preserve_full_accumulators_and_saturate() {
+    let cases = [
+        [0x807fff01, 0xff0180fe, 0x81234567, 0],
+        [0x01010101, 0x01010101, u32::MAX - 1, 0],
+        [0x80808080, 0x80808080, 0x7fffffff, 0],
+        [0x7f7f7f7f, 0x81818181, 0x80000001, 0],
+        [0xffffffff, 0xffffffff, u32::MAX - 1, 0],
+        [0x00000080, 0x00000001, 0x80000000, 0],
+    ];
+    for signed in [true, false] {
+        for clamp in [false, true] {
+            let op = if signed { 0x16 } else { 0x17 };
+            let words = [
+                (0x33 << 26) | (op << 16) | 0x4000 | (u32::from(clamp) << 15),
+                u32::from(vgpr(1))
+                    | (u32::from(vgpr(2)) << 9)
+                    | (u32::from(vgpr(3)) << 18)
+                    | (3 << 27),
+            ];
+            let shader = build_valu_cs(&words);
+            run_cases(&shader, &cases, |backend, _, [a, b, acc, _], actual| {
+                let dot = a
+                    .to_le_bytes()
+                    .into_iter()
+                    .zip(b.to_le_bytes())
+                    .map(|(a, b)| {
+                        if signed {
+                            i64::from(a as i8) * i64::from(b as i8)
+                        } else {
+                            i64::from(a) * i64::from(b)
+                        }
+                    })
+                    .sum::<i64>();
+                let sum = dot
+                    + if signed {
+                        i64::from(acc as i32)
+                    } else {
+                        i64::from(acc)
+                    };
+                let expected = if clamp {
+                    if signed {
+                        sum.clamp(i32::MIN as i64, i32::MAX as i64)
+                    } else {
+                        sum.min(u32::MAX as i64)
+                    }
+                } else {
+                    sum
+                } as u32;
+                assert_eq!(actual, expected, "{backend}: signed={signed} clamp={clamp}");
+            });
+        }
+    }
+}
+
 /// [`build_valu_cs`] with `threads` threads in x (thread index in `v0`
 /// on entry, before `body`) and `lds_bytes` of LDS (a multiple of 512).
 fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {

@@ -21,6 +21,11 @@ before the port and passes afterward, including signed bytes and overflow.
 The portable shader suite and policy tests pass. Title effects remain to
 be measured after rebuilding.
 
+The follow-up VOP3P byte-dot port adds signed and unsigned full-width
+accumulation and saturation, with focused GPU readback. Captured programs
+previously stopped at this instruction after the first dot port; complete
+upscaler coverage must still be measured.
+
 ## 3. Translate root constant buffers as raw bytes
 
 Acceptance: the opt-in path preserves constant values and root bindings;

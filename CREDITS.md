@@ -333,3 +333,16 @@ This adaptation reuses bittersweet's write-watch handler and falls back
 to the kernel copy if vectored-handler registration fails. The default
 path is unchanged. Synthetic Proton checks cover guarded, reserved and
 read-only pages, sparse remapping and write-watch visibility.
+
+## Full-width packed byte dot products
+
+`v_dot4_i32_i8` support follows the DXIL intrinsic approach in
+`DoubleGhosty/cool_fox` main at
+`636954118fae4a42fc75c84520836da147003073`. The adaptation uses the
+full-width operand rules in the
+[AMD RDNA2 ISA](https://docs.amd.com/v/u/en-US/rdna2-shader-instruction-set-architecture)
+and [LLVM's RDNA2 instruction reference](https://rocmdocs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPU/AMDGPUAsmGFX1030.html).
+It also handles unsigned byte products and signed/unsigned saturation
+using Microsoft's documented DXIL packed-dot opcodes 163 and 164.
+Synthetic hardware readback under GE-Proton11-14 covers negative products,
+full-width accumulators, wrapping and both saturation bounds.

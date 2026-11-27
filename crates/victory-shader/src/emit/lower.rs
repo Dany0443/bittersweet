@@ -7222,6 +7222,47 @@ impl<'a> Lower<'a> {
             return self.packed16(inst, op, guard);
         }
         match name {
+            "v_dot4_i32_i8" | "v_dot4_u32_u8" => {
+                if v.neg_hi != 0 {
+                    return Err("negation on a packed dot product");
+                }
+                let (a, b, acc) = (s(self, 0)?, s(self, 1)?, s(self, 2)?);
+                let signed = name == "v_dot4_i32_i8";
+                let zero = self.s.m.i32(0);
+                let dot = self.s.op(
+                    c,
+                    "dot4AddPacked.i32",
+                    Attr::ReadNone,
+                    self.s.t.i32,
+                    if signed { 163 } else { 164 },
+                    &[if v.clamp { zero } else { acc }, a, b],
+                );
+                if !v.clamp {
+                    return int(self, dot);
+                }
+                // Four byte products fit i32; only adding the accumulator can overflow.
+                let sum = self.s.m.bin(c, Bin::Add, acc, dot);
+                let (overflow, bound) = if signed {
+                    let negative = self.s.m.cmp(c, pred::SLT, dot, zero);
+                    let under = self.s.m.cmp(c, pred::SGT, sum, acc);
+                    let over = self.s.m.cmp(c, pred::SLT, sum, acc);
+                    let overflow = self.s.m.select(c, negative, under, over);
+                    let min = self.s.m.i32(i32::MIN as u32);
+                    let max = self.s.m.i32(i32::MAX as u32);
+                    (overflow, self.s.m.select(c, negative, min, max))
+                } else {
+                    (
+                        self.s.m.cmp(c, pred::IULT, sum, acc),
+                        self.s.m.i32(u32::MAX),
+                    )
+                };
+                let result = self.s.m.select(c, overflow, bound, sum);
+                let Some(Operand::Vector { reg, .. }) = v.dst else {
+                    return Err("a packed dot result outside a VGPR");
+                };
+                self.write(inst, Reg::V(reg), result, guard);
+                Ok(())
+            }
             // 16x16 to 32-bit multiply-add. op_sel chooses each source half;
             // the third operand and result remain full width.
             "v_mad_u32_u16" | "v_mad_i32_i16" => {
