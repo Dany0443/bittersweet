@@ -514,6 +514,13 @@ Bittersweet's existing depth twin pass already writes the float used by
 the Series runtime's depth tests. The D32_FLOAT_S8X24 host format
 preserves that value, and the readback covers depth equality and stencil.
 
+### Half-precision reductions with inactive lanes
+
+Adapted the native wave64 reduction from KomanderDG88/VIniVIdiVIci
+commit `a26859f`. Each step reads an active lane's partial sum, gives
+empty subtrees zero, and keeps the console's half-precision rounding.
+The GPU readback exercises eight active lane counts.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from

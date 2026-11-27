@@ -2277,9 +2277,8 @@ impl<'a> Lower<'a> {
     /// lane whose number differs in one bit, step by step; two host waves of 32 then exchange
     /// their halves' sums for the last addition. The high half of the result is lane 0's,
     /// which no `v_add_f16` writes.
-    /// That needs every lane of a full wave there to be read: refused where not every lane
-    /// runs, in a thread group that does not fill its waves, and for each half-wave on its
-    /// own (half a sum is no sum).
+    /// Two cooperating host waves need all their lanes at the exchange.
+    /// A native wave64 can reconstruct partial sums from the active lanes.
     fn half_sum(&mut self, x: V) -> Result<V, Why> {
         const WHERE: Why = "a wave sum of 16-bit floats where not every lane runs";
         let threads = self.s.threads.ok_or("a wave sum of 16-bit floats outside compute")?;
@@ -2303,8 +2302,9 @@ impl<'a> Lower<'a> {
         if !every {
             if halves {
                 need(self.cur_ir);
+                return Err(WHERE);
             }
-            return Err(WHERE);
+            return Ok(self.half_sum_active(x));
         }
         let c = self.cur;
         let i32t = self.s.t.i32;
@@ -2330,6 +2330,57 @@ impl<'a> Lower<'a> {
         let total = self.s.m.bin(c, Bin::And, total, low);
         let first = self.s.m.bin(c, Bin::And, lo, high);
         Ok(self.s.m.bin(c, Bin::Or, first, total))
+    }
+
+    /// Read the partial sum from any active lane of the peer subtree.
+    /// Empty subtrees contribute positive zero, as the console reduction
+    /// does for lanes that left the program.
+    fn half_sum_active(&mut self, x: V) -> V {
+        let c = self.cur;
+        let i32t = self.s.t.i32;
+        self.s.flags |= flags::WAVE_OPS;
+        let four = self.s.m.named_struct("dx.types.fouri32", vec![i32t; 4]);
+        let active = self.s.m.bool(true);
+        let ballot = self.s.op(c, "waveActiveBallot", Attr::NoUnwind, four, 116, &[active]);
+        let low = self.s.m.extract(c, ballot, 0);
+        let high = self.s.m.extract(c, ballot, 1);
+        let lane = self.s.op(c, "waveGetLaneIndex", Attr::ReadOnly, i32t, 111, &[]);
+        let [zero, bit0, k31, k32] = [0, 1, 31, 32].map(|k| self.s.m.i32(k));
+
+        let mut sum = x;
+        for step in 0..6 {
+            let size = 1u32 << step;
+            let bit = self.s.m.i32(size);
+            let align = self.s.m.i32(!(size - 1));
+            let peer = self.s.m.bin(c, Bin::Xor, lane, bit);
+            let start = self.s.m.bin(c, Bin::And, peer, align);
+            let upper = self.s.m.cmp(c, pred::IUGE, start, k32);
+            let word = self.s.m.select(c, upper, high, low);
+            let shift = self.s.m.bin(c, Bin::And, start, k31);
+            let mut bits = self.s.m.bin(c, Bin::LShr, word, shift);
+            if size < 32 {
+                let mask = self.s.m.i32((1u32 << size) - 1);
+                bits = self.s.m.bin(c, Bin::And, bits, mask);
+            }
+            let found = self.s.m.cmp(c, pred::NE, bits, zero);
+            let first = self.s.op(c, "unaryBits.i32", Attr::ReadNone, i32t, 32, &[bits]);
+            let first = self.s.m.bin(c, Bin::Add, start, first);
+            // Never ask WaveReadLaneAt to read an inactive lane.
+            let from = self.s.m.select(c, found, first, lane);
+            let partial = self.read_lane(sum, from);
+            let partial = self.s.m.select(c, found, partial, zero);
+            sum = self.add_halves(sum, partial);
+        }
+
+        let lane0 = self.s.m.bin(c, Bin::And, low, bit0);
+        let has_lane0 = self.s.m.cmp(c, pred::NE, lane0, zero);
+        let from = self.s.m.select(c, has_lane0, zero, lane);
+        let first = self.read_lane(x, from);
+        let first = self.s.m.select(c, has_lane0, first, zero);
+        let [low, high] = [0xFFFF, 0xFFFF_0000].map(|k| self.s.m.i32(k));
+        let first = self.s.m.bin(c, Bin::And, first, high);
+        let sum = self.s.m.bin(c, Bin::And, sum, low);
+        self.s.m.bin(c, Bin::Or, first, sum)
     }
 
     /// A whole-wave reduction (or sum prefix) of `arg` over the host wave.
