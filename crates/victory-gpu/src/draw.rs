@@ -2124,6 +2124,7 @@ impl State {
         }
         let Some(buffer) = list.mesh_scratch(size) else { return false };
         list.keep(&buffer);
+        list.keep(&fallback.compute);
         list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
         let base = unsafe { buffer.GetGPUVirtualAddress() };
@@ -2135,6 +2136,7 @@ impl State {
             }
             list.list.Dispatch(groups, 1, 1);
         }
+        list.begin_command();
         let read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE.0 as u32
             | D3D12_RESOURCE_STATE_INDEX_BUFFER.0 as u32;
         list.buffer_state(&buffer, read);
@@ -2884,15 +2886,18 @@ impl State {
         fallback: &crate::pipeline::host::MeshFallback,
         (stride, max, arguments, count): (u32, u32, u64, Option<u64>)) -> bool {
         use crate::mesh_indirect::{COMPUTE_STRIDE, draw_stride};
+        if max == 0 {
+            return true;
+        }
         let (Some(signatures), Some(convert)) = (&fallback.signatures, crate::mesh_indirect::convert()) else {
-            tracing::warn!(pipeline = %p.name, "indirect mesh fallback unavailable");
+            once!(pipeline = %p.name, "indirect mesh fallback unavailable");
             return false;
         };
         if stride < 12 || stride % 4 != 0 {
             tracing::warn!(stride, "indirect mesh fallback has an invalid argument stride");
             return false;
         }
-        let records = max.max(1);
+        let records = max;
         let regions = crate::mesh_indirect::regions(&fallback.layout);
         let compute_bytes = (u64::from(records) * u64::from(COMPUTE_STRIDE)).next_multiple_of(256);
         let command_bytes = compute_bytes + u64::from(records) * u64::from(draw_stride(fallback.expanded));
@@ -2910,27 +2915,38 @@ impl State {
         args.refresh(list, arguments, len);
         if let Some((shadow, at)) = &count_shadow { shadow.refresh(list, *at, 4); }
         let (Some(data), Some(commands)) = (list.mesh_scratch(regions.bytes), list.indirect_scratch(command_bytes)) else { return false };
+        // The mesh converter overwrites the same scratch used by the
+        // ordinary argument clamp, invalidating any cached records.
+        self.window = None;
         list.keep(&data);
         list.keep(&commands);
+        list.keep(&fallback.compute);
+        list.keep(&signatures.compute);
+        list.keep(&signatures.draw);
         let data_gpu = unsafe { data.GetGPUVirtualAddress() };
         let command_gpu = unsafe { commands.GetGPUVirtualAddress() };
-        list.buffer_state(&args.buffer, crate::host::BUFFER_WRITE);
-        if let Some((shadow, _)) = &count_shadow { list.buffer_state(&shadow.buffer, crate::host::BUFFER_WRITE); }
-        list.buffer_state(&data, crate::host::BUFFER_WRITE);
+        list.begin_command();
+        list.buffer_state(&args.buffer, crate::host::BUFFER_READ);
+        if let Some((shadow, _)) = &count_shadow { list.buffer_state(&shadow.buffer, crate::host::BUFFER_READ); }
         list.buffer_state(&commands, crate::host::BUFFER_WRITE);
         let constants = crate::mesh_indirect::plan((records, stride, count.is_some()),
             &fallback.layout, &regions, fallback.expanded, data_gpu, compute_offset);
         crate::mesh_indirect::record(&list.list, convert, &constants, args.gpu(arguments),
             count_shadow.as_ref().map(|(shadow, at)| shadow.gpu(*at)), command_gpu);
+        // Cross the command boundary so BufferStates emits a UAV to
+        // indirect argument transition instead of retaining write state.
+        list.begin_command();
         list.buffer_state(&commands, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT.0 as u32);
         self.host_pipeline = 0;
         self.host_roots[1] = 0;
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
+        list.buffer_state(&data, crate::host::BUFFER_WRITE);
         unsafe {
             list.list.SetPipelineState(&fallback.compute);
             self.host_pipeline = fallback.compute.as_raw() as usize;
             list.list.ExecuteIndirect(&signatures.compute, records, &commands, 0, None, 0);
         }
+        list.begin_command();
         let read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE.0 as u32
             | D3D12_RESOURCE_STATE_INDEX_BUFFER.0 as u32;
         list.buffer_state(&data, read);

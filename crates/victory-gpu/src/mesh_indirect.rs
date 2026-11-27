@@ -40,21 +40,19 @@ pub(crate) const fn draw_stride(expanded: bool) -> u32 {
 }
 
 const SOURCE: &str = r#"
-#define RS "RootConstants(num32BitConstants=16, b0), UAV(u0), UAV(u1), UAV(u2)"
 cbuffer Plan : register(b0) {
     uint records; uint stride; uint counted; uint capacity;
     uint vertex_bytes; uint primitives; uint prim_bytes; uint expanded;
     uint2 vertices; uint2 indices; uint2 prims; uint draws; uint unused;
 };
 // The title's records (clamped: x groups, then 1, 1) and their count.
-RWByteAddressBuffer args : register(u0);
-RWByteAddressBuffer count : register(u1);
-RWByteAddressBuffer commands : register(u2);
+ByteAddressBuffer args : register(t0);
+ByteAddressBuffer count : register(t1);
+RWStructuredBuffer<uint> commands : register(u0);
 uint2 at(uint2 base, uint offset) {
     uint lo = base.x + offset;
     return uint2(lo, base.y + (lo < base.x ? 1u : 0u));
 }
-[RootSignature(RS)]
 [numthreads(1, 1, 1)]
 void main() {
     uint n = counted != 0 ? min(count.Load(0), records) : records;
@@ -62,22 +60,34 @@ void main() {
     uint used = 0;
     for (uint i = 0; i < records; i++) {
         uint g = i < n ? args.Load(i * stride) : 0u;
-        if (g > capacity - used) {
+        if (g > 65535u || g > capacity - used) {
             g = 0;
         }
-        uint c = i * 40;
-        commands.Store2(c, at(vertices, used * vertex_bytes));
-        commands.Store2(c + 8, at(indices, used * primitives * 12));
-        commands.Store2(c + 16, at(prims, used * prim_bytes));
-        commands.Store3(c + 24, uint3(g, 1, 1));
+        uint c = i * 10;
+        uint2 vertex = at(vertices, used * vertex_bytes);
+        uint2 index = at(indices, used * primitives * 12);
+        uint2 prim = at(prims, used * prim_bytes);
+        commands[c] = vertex.x;
+        commands[c + 1] = vertex.y;
+        commands[c + 2] = index.x;
+        commands[c + 3] = index.y;
+        commands[c + 4] = prim.x;
+        commands[c + 5] = prim.y;
+        commands[c + 6] = g;
+        commands[c + 7] = 1;
+        commands[c + 8] = 1;
+        commands[c + 9] = 0;
         uint first = used * primitives * 3;
-        uint d = draws + i * (expanded != 0 ? 24 : 32);
-        commands.Store2(d, at(vertices, used * vertex_bytes));
-        // Count, one instance, first index or vertex, then a base vertex
-        // and first instance of 0 (indexed) or a first instance of 0.
-        commands.Store4(d + 8, uint4(primitives * 3 * g, 1, first, 0));
+        uint d = draws / 4 + i * (expanded != 0 ? 6 : 8);
+        commands[d] = vertex.x;
+        commands[d + 1] = vertex.y;
+        commands[d + 2] = primitives * 3 * g;
+        commands[d + 3] = 1;
+        commands[d + 4] = first;
+        commands[d + 5] = 0;
         if (expanded == 0) {
-            commands.Store(d + 24, 0);
+            commands[d + 6] = 0;
+            commands[d + 7] = 0;
         }
         used += g;
     }
@@ -111,7 +121,43 @@ pub(crate) fn convert() -> Option<&'static Convert> {
         .as_ref()
 }
 
-fn make(device: &ID3D12Device) -> windows::core::Result<Convert> {
+// Serialize the signature separately. Wine's compiler handles this shader
+// using the same SRV reads and structured UAV writes as the argument clamp.
+fn converter_root(device: &ID3D12Device) -> windows::core::Result<ID3D12RootSignature> {
+    let constants = D3D12_ROOT_PARAMETER1 {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Constants: D3D12_ROOT_CONSTANTS {
+                Num32BitValues: 16,
+                ..Default::default()
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    let descriptor = |kind, register| D3D12_ROOT_PARAMETER1 {
+        ParameterType: kind,
+        Anonymous: D3D12_ROOT_PARAMETER1_0 {
+            Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                ShaderRegister: register,
+                RegisterSpace: 0,
+                Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+    };
+    crate::host::helper_root_signature(
+        device,
+        &[
+            constants,
+            descriptor(D3D12_ROOT_PARAMETER_TYPE_SRV, 0),
+            descriptor(D3D12_ROOT_PARAMETER_TYPE_SRV, 1),
+            descriptor(D3D12_ROOT_PARAMETER_TYPE_UAV, 0),
+        ],
+        &[],
+    )
+}
+
+fn compile() -> windows::core::Result<ID3DBlob> {
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
     // SAFETY: the source and names live through the call; out pointers ours.
@@ -146,12 +192,16 @@ fn make(device: &ID3D12Device) -> windows::core::Result<Convert> {
         }
         return Err(e);
     }
-    let code = code.ok_or_else(windows::core::Error::empty)?;
-    // SAFETY: the blob's own bytes; the root signature is inside the shader.
+    code.ok_or_else(windows::core::Error::empty)
+}
+
+fn make(device: &ID3D12Device) -> windows::core::Result<Convert> {
+    let code = compile()?;
+    let root = converter_root(device)?;
+    // SAFETY: the blob owns its bytes and the description borrows the live root.
     unsafe {
         let bytes =
             std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, bytes)?;
         let pso: ID3D12PipelineState =
             device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&root),
@@ -299,8 +349,7 @@ pub(crate) fn plan(
 
 /// Records the pass: `records` title records `stride` bytes apart at
 /// `args` (and their count at `count`, if the title gives one), both in
-/// UNORDERED_ACCESS; the commands go to `commands`, in UNORDERED_ACCESS
-/// too. Replaces the list's compute root signature and pipeline.
+/// NON_PIXEL_SHADER_RESOURCE; the commands go to `commands`, in UNORDERED_ACCESS. Replaces the list's compute root signature and pipeline.
 pub(crate) fn record(
     list: &ID3D12GraphicsCommandList,
     c: &Convert,
@@ -315,8 +364,8 @@ pub(crate) fn record(
         list.SetComputeRootSignature(&c.root);
         list.SetPipelineState(&c.pso);
         list.SetComputeRoot32BitConstants(0, 16, plan.as_ptr().cast(), 0);
-        list.SetComputeRootUnorderedAccessView(1, args);
-        list.SetComputeRootUnorderedAccessView(2, count.unwrap_or(args));
+        list.SetComputeRootShaderResourceView(1, args);
+        list.SetComputeRootShaderResourceView(2, count.unwrap_or(args));
         list.SetComputeRootUnorderedAccessView(3, commands);
         list.Dispatch(1, 1, 1);
     }
@@ -324,3 +373,8 @@ pub(crate) fn record(
 
 #[cfg(test)]
 mod tests;
+
+#[test]
+fn argument_converter_compiles_without_a_gpu() {
+    compile().expect("the host HLSL compiler accepts the mesh argument converter");
+}

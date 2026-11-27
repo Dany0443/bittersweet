@@ -143,7 +143,7 @@ fn run(
         list.ResourceBarrier(&[transition(
             &data,
             D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
         )]);
         let base = data.GetGPUVirtualAddress();
         let commands = out.GetGPUVirtualAddress();

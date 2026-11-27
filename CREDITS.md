@@ -491,6 +491,15 @@ pipeline compiled on RADV. The same rule also let a compute pipeline at
 the world handover compile. The Linux host plan enables this only for
 RDNA 1.
 
+### Mesh argument conversion under Wine
+
+Bittersweet adapts the Hybrid snapshot's indirect mesh argument pass to
+use the read-only byte address buffers, structured output UAV and separate
+root signature already used by this project's indirect argument clamp.
+The conversion, dispatch and draw each advance buffer state tracking at
+their command boundaries. A compiler-only regression test exercises Wine's
+HLSL compiler without creating a GPU device.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from
