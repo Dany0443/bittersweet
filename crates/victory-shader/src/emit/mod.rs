@@ -116,7 +116,10 @@ use crate::{ShaderError, io, ir, resource, structure};
 
 pub use bitcode::census;
 pub use sampler::StaticSampler;
-pub use lower::{set_host_max_wave, set_host_pixel_wave};
+pub use lower::{
+    host_barycentrics_supported, set_host_barycentrics_supported, set_host_max_wave,
+    set_host_pixel_wave,
+};
 pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY,
@@ -1900,6 +1903,89 @@ mod barycentric_tests {
         assert_eq!(features & 0x2_0000, 0);
         assert!(inputs.iter().all(|e| e.kind != 28), "{inputs:?}");
         validate(&shader);
+    }
+
+    /// Runs `f` as a host without native barycentrics reports itself.
+    fn without_native_barycentrics<R>(f: impl FnOnce() -> R) -> R {
+        lower::TEST_BARYCENTRICS_SUPPORTED.with(|c| c.set(Some(false)));
+        let r = f();
+        lower::TEST_BARYCENTRICS_SUPPORTED.with(|c| c.set(None));
+        r
+    }
+
+    /// RDNA 1 has no `SV_Barycentrics`: a read that no interpolation needs
+    /// becomes zero and declares no barycentric input.
+    #[test]
+    fn without_native_barycentrics_a_free_read_is_zero() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [v_add_f32(2, 0, 1), e0, e1, S_ENDPGM];
+        let shader = without_native_barycentrics(|| pixel(&words, PERSP_CENTER).unwrap());
+        let (features, inputs) = parts(&shader);
+        assert_eq!(features & 0x2_0000, 0, "no Barycentrics feature");
+        assert!(inputs.iter().all(|e| e.kind != 28), "{inputs:?}");
+        validate(&shader);
+    }
+
+    /// Without barycentrics, interpolation that also reads a weight falls
+    /// back to ordinary interpolation; the weight reads zero.
+    #[test]
+    fn without_native_barycentrics_interpolation_and_a_read_fall_back() {
+        let [e0, e1] = exp_mrt0(3);
+        let words = [
+            0xC808_0000,        // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001,        // v_interp_p2_f32 v2, v1, attr0.x
+            v_add_f32(3, 2, 1), // v3 = attribute + j
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let shader = without_native_barycentrics(|| pixel(&words, PERSP_CENTER).unwrap());
+        let (features, inputs) = parts(&shader);
+        assert_eq!(features & 0x2_0000, 0, "no Barycentrics feature");
+        assert!(inputs.iter().all(|e| e.kind != 28), "{inputs:?}");
+        assert_eq!(texcoord_mode(&shader), 2, "still perspective interpolation");
+        validate(&shader);
+    }
+
+    /// A weighted interpolation cannot be expressed without barycentrics:
+    /// the translation says so rather than emitting a form the host refuses.
+    #[test]
+    fn without_native_barycentrics_weighted_interpolation_is_refused() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0x1006_00F0, // v_mul_f32 v3, 0.5, v0
+            0xC808_0003, // v_interp_p1_f32 v2, v3, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let err = without_native_barycentrics(|| pixel(&words, PERSP_CENTER).unwrap_err());
+        assert!(
+            format!("{err:?}").contains("weighted barycentric interpolation unsupported"),
+            "{err:?}"
+        );
+    }
+
+    /// P10 or P20 asks for one vertex's attribute value; without barycentrics
+    /// the hardware interpolation cannot supply it.
+    #[test]
+    fn without_native_barycentrics_a_vertex_value_is_refused() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            0xC812_0000, // v_interp_mov_f32 v4, p10, attr0.x
+            v_add_f32(2, 2, 4),
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let err = without_native_barycentrics(|| pixel(&words, PERSP_CENTER).unwrap_err());
+        assert!(
+            format!("{err:?}").contains("per-vertex attribute interpolation unsupported"),
+            "{err:?}"
+        );
     }
 
     /// Both: the attribute is interpolated and J is used as a value.

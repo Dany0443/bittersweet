@@ -959,6 +959,43 @@ pub fn set_host_max_wave(lanes: u32) {
     HOST_MAX_WAVE.store(lanes, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Whether the host supports native pixel-shader barycentrics
+/// (`SV_Barycentrics` / `attributeAtVertex`): 0 not told yet, 1 yes, 2 no.
+static HOST_BARYCENTRICS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Tells the translator whether the host has native pixel-shader
+/// barycentrics. RDNA 1 hosts report none (`D3D12_OPTIONS3`); their
+/// conventional interpolation then runs through the input signature, and
+/// programs that need per-vertex or weighted barycentrics are refused
+/// instead of emitting a form the host cannot create.
+pub fn set_host_barycentrics_supported(on: bool) {
+    HOST_BARYCENTRICS.store(
+        if on { 1 } else { 2 },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Whether the host has native barycentrics; `VICTORY_BARYCENTRICS=0`
+/// answers no before the device is queried (offline translation).
+pub fn host_barycentrics_supported() -> bool {
+    #[cfg(test)]
+    if let Some(on) = TEST_BARYCENTRICS_SUPPORTED.get() {
+        return on;
+    }
+    match HOST_BARYCENTRICS.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => std::env::var_os("VICTORY_BARYCENTRICS").is_none_or(|v| v != "0"),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A test's choice for [`host_barycentrics_supported`], for its thread.
+    pub(super) static TEST_BARYCENTRICS_SUPPORTED: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
+}
+
 thread_local! {
     /// See [`take_needs`].
     static NEEDS: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -2635,6 +2672,13 @@ impl<'a> Lower<'a> {
     /// shortcut: triangles only; on lines and points the console's i and j
     /// are not checked against the host's weights.
     fn barycentric(&mut self, kind: Barycentric, index: u8) -> Val {
+        if !host_barycentrics_supported() {
+            // Without native barycentrics a read that no interpolation
+            // needs (dead or unexpected) becomes a benign zero. Programs
+            // that do need the weights are refused where they interpolate.
+            let z = self.s.m.f32(0f32.to_bits());
+            return Val::I32(self.as_int(z));
+        }
         let Some(mode) = interp_mode(kind) else {
             return Val::Missing("pull-model barycentrics");
         };
@@ -9748,7 +9792,8 @@ impl<'a> Lower<'a> {
                 ..
             } => {
                 let mode = interp_mode(barycentric).ok_or("pull-model interpolation")?;
-                let eval = if self.per_vertex(attribute.row) {
+                let native_bary = host_barycentrics_supported();
+                let eval = if self.per_vertex(attribute.row) && native_bary {
                     // The element is read per vertex elsewhere, so it is
                     // constant: weigh its vertices with SV_Barycentrics.
                     let mut ij = [None; 2];
@@ -9766,6 +9811,9 @@ impl<'a> Lower<'a> {
                         j: ij[1],
                     }
                 } else {
+                    // Ordinary interpolation, or a host without
+                    // barycentrics: keep the attribute in the signature and
+                    // let the hardware interpolate it.
                     Eval::Mode(mode)
                 };
                 (attribute, eval)
@@ -9779,6 +9827,11 @@ impl<'a> Lower<'a> {
             // and P2 - P0, which is what the hardware holds for an
             // attribute the program also interpolates.
             Interp::Vertex { attribute, vertex } if self.interpolated(attribute.row) => {
+                if !host_barycentrics_supported() {
+                    return Err(
+                        "per-vertex attribute interpolation unsupported on a host without barycentrics",
+                    );
+                }
                 let one = Some(self.s.m.f32(1f32.to_bits()));
                 let (i, j) = if vertex == 0 {
                     (one, None)
@@ -9791,6 +9844,11 @@ impl<'a> Lower<'a> {
             // A half of an interpolation with computed i or j: P0 + i P10,
             // or the old dst (f16: the third operand) + j P20.
             Interp::Weighted { attribute } if name.starts_with("v_interp_p1") => {
+                if !host_barycentrics_supported() {
+                    return Err(
+                        "weighted barycentric interpolation unsupported on a host without barycentrics",
+                    );
+                }
                 let i = Some(float(self, src)?);
                 (
                     attribute,
@@ -9802,6 +9860,11 @@ impl<'a> Lower<'a> {
                 )
             }
             Interp::Weighted { attribute } => {
+                if !host_barycentrics_supported() {
+                    return Err(
+                        "weighted barycentric interpolation unsupported on a host without barycentrics",
+                    );
+                }
                 let old = match &inst.fields {
                     Fields::Valu(v) => v.src.get(2).copied(),
                     _ => Some(dst),
@@ -9929,6 +9992,9 @@ impl<'a> Lower<'a> {
     /// interpolation with computed barycentrics, or P10 or P20): then its
     /// element is declared constant and read with `attributeAtVertex`.
     fn per_vertex(&self, row: u8) -> bool {
+        if !host_barycentrics_supported() {
+            return false;
+        }
         self.x.io.interps.iter().any(|(_, i)| match *i {
             Interp::Weighted { attribute } => attribute.row == row,
             Interp::Vertex { attribute, vertex } => {

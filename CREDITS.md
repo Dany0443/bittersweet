@@ -371,3 +371,18 @@ query writes only the spatial coordinates of an array texture, so the
 array slice now stays undefined instead of being passed as a third
 coordinate the host validator rejects. A unit test pins the coordinate
 count for queries and ordinary texture operations.
+
+## Barycentric interpolation without native support
+
+Hosts that report no native pixel-shader barycentrics in
+`D3D12_FEATURE_DATA_D3D12_OPTIONS3` (the RDNA 1 generation) now
+translate conventional interpolation through the input signature. The
+capability probe and the fallback rules follow the RDNA 1 hybrid work
+in `frojo2211-ctrl/VIctory-RDNA1-Hybrid`, snapshot
+`62cd92a73049ea4188b9f501121fc2f116cdda79`, adapted to this tree's
+translator. Free barycentric reads become zero, computed weights fall
+back to ordinary interpolation, and weighted or per-vertex forms are
+refused with a named reason rather than failing pipeline creation.
+`VICTORY_BARYCENTRICS=0` selects the fallback before a device exists for
+offline translation. The capability is part of the shader cache
+fingerprint.

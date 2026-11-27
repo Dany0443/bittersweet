@@ -688,6 +688,22 @@ fn create() -> windows::core::Result<Host> {
             victory_shader::emit::set_host_max_wave(lanes);
             victory_shader::emit::set_host_pixel_wave(o1.WaveLaneCountMax);
         }
+        // Whether the host declares `SV_Barycentrics` and
+        // `attributeAtVertex`. RDNA 1 reports neither: conventional
+        // interpolation then uses the input signature, and programs that
+        // need the weights are refused instead of failing pipeline
+        // creation.
+        let mut o3 = D3D12_FEATURE_DATA_D3D12_OPTIONS3::default();
+        let barycentrics = device
+            .CheckFeatureSupport(
+                D3D12_FEATURE_D3D12_OPTIONS3,
+                (&raw mut o3).cast(),
+                size_of_val(&o3) as u32,
+            )
+            .is_ok()
+            && o3.BarycentricsSupported.as_bool();
+        victory_shader::emit::set_host_barycentrics_supported(barycentrics);
+        tracing::info!(barycentrics, "host shader barycentrics support");
         let messages = debug
             .then(|| device.cast::<ID3D12InfoQueue>().ok())
             .flatten();
