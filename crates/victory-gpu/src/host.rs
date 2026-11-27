@@ -1946,6 +1946,16 @@ impl<T> Spare<T> {
 /// Scratch chunks no list holds.
 static SPARE: Mutex<Spare<Chunk>> = Mutex::new(Spare::new());
 
+/// Free mesh output buffers. A command list owns one until its last
+/// submission has completed and it is reset.
+struct MeshScratch(ID3D12Resource);
+// SAFETY: D3D12 resources are free-threaded. Only the owning list records
+// commands using the buffer.
+unsafe impl Send for MeshScratch {}
+
+static SPARE_MESH: Mutex<Spare<MeshScratch>> = Mutex::new(Spare::new());
+const SPARE_MESH_MAX: u64 = 64 << 20;
+
 /// A scratch chunk of `size` bytes: one kept ([`SPARE`]) or a new one.
 fn take_chunk(host: &Host, size: u64) -> Option<Chunk> {
     if scratch_pool()
@@ -5557,6 +5567,18 @@ impl HostList {
         if let Err(e) = reset {
             fail(format_args!("a host command list did not reset ({e})"));
         }
+        let mesh = self
+            .mesh_scratch
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some((buffer, capacity)) = mesh {
+            let excess = SPARE_MESH
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .give(MeshScratch(buffer), capacity, SPARE_MESH_MAX);
+            drop(excess);
+        }
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(
             crate::copystat::C::ResetNs,
@@ -6208,15 +6230,27 @@ impl HostList {
 
     /// A device-local UAV buffer reused by mesh fallback dispatches.
     pub(crate) fn mesh_scratch(&self, size: u64) -> Option<ID3D12Resource> {
-        let needed = size.max(256).next_multiple_of(64 << 10);
+        // A small set of allocation sizes lets different lists reuse the
+        // same buffers without exceeding the next power-of-two capacity.
+        let needed = size.max(64 << 10).checked_next_power_of_two()?;
         let mut slot = self.mesh_scratch.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((buffer, capacity)) = &*slot && *capacity >= needed {
             return Some(buffer.clone());
         }
-        let capacity = slot.as_ref().map_or(needed, |(_, old)| old.saturating_mul(2).max(needed));
-        let buffer = host()?.uav_buffer(capacity)?;
-        name(&buffer, || format!("mesh output scratch {capacity:#x}"));
-        if let Some((old, _)) = slot.replace((buffer.clone(), capacity)) { self.keep(&old); }
+        let spare = SPARE_MESH
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take(needed);
+        let buffer = if let Some(MeshScratch(buffer)) = spare {
+            buffer
+        } else {
+            let buffer = host()?.uav_buffer(needed)?;
+            name(&buffer, || format!("mesh output scratch {needed:#x}"));
+            buffer
+        };
+        if let Some((old, _)) = slot.replace((buffer.clone(), needed)) {
+            self.keep(&old);
+        }
         Some(buffer)
     }
 
@@ -8368,7 +8402,8 @@ mod trail {
 
 #[cfg(test)]
 mod spare {
-    use super::Spare;
+    use super::{BUFFER_WRITE, Spare, host};
+    use windows::core::Interface;
 
     /// Kept things come back by size, the last given first, and nothing is
     /// kept past the limit.
@@ -8390,6 +8425,34 @@ mod spare {
         assert_eq!(spare.take(1), Some(2));
         assert_eq!(spare.bytes, 0);
         assert!(spare.kept.is_empty());
+    }
+
+    #[test]
+    fn mesh_scratch_can_move_to_another_list_after_reset() {
+        let Some(host) = host() else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        let first = host.new_list().unwrap();
+        let second = host.new_list().unwrap();
+        let original = first.mesh_scratch(6 << 20).unwrap();
+        let address = original.as_raw();
+        first.begin_command();
+        first.buffer_state(&original, BUFFER_WRITE);
+        first.keep(&original);
+        drop(original);
+        first.close();
+        host.execute(&[&first]);
+        first.reset();
+
+        let reused = second.mesh_scratch(7 << 20).unwrap();
+        assert_eq!(reused.as_raw(), address);
+        second.begin_command();
+        second.buffer_state(&reused, BUFFER_WRITE);
+        second.keep(&reused);
+        second.close();
+        host.execute(&[&second]);
+        eprintln!("mesh scratch reused on a second submitted D3D12 list");
     }
 }
 
