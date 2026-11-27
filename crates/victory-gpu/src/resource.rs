@@ -226,14 +226,15 @@ fn footprint(desc: &ResourceDesc) -> Option<AllocationInfo> {
     })
 }
 
-/// A format as the host has it. The console's 16-bit depth with stencil
-/// (and its typeless views) has no PC format: the 24-bit ones stand in.
+/// Map the console's 16-bit depth and stencil family to float depth and
+/// stencil. The depth twin pass writes the same float shaders use for
+/// equality tests. Depth bias uses the host format's float steps.
 #[cfg_attr(not(windows), allow(dead_code))] // read by the Windows host; tested everywhere
 pub(crate) fn pc_format(format: u32) -> u32 {
     match format {
-        118 => 45,
-        119 => 46,
-        120 => 47,
+        118 => 20,
+        119 => 21,
+        120 => 22,
         other => other,
     }
 }
@@ -3200,6 +3201,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_stencil_planes_twin_reaches_the_plane() {
+        check_stencil_twin(45, 44);
+        check_stencil_twin(118, 19);
+    }
+
+    #[cfg(windows)]
+    fn check_stencil_twin(format: u32, typeless: i32) {
         use std::sync::atomic::Ordering::Relaxed;
         use windows::Win32::Graphics::Direct3D12::*;
         use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
@@ -3210,7 +3217,7 @@ mod tests {
         const DEPTH_WRITE: u32 = 0x10;
         let desc = ResourceDesc {
             flags: 6,
-            ..texture(4, 4, 45, 1)
+            ..texture(4, 4, format, 1)
         };
         let mut depth = null;
         assert_eq!(
@@ -3232,8 +3239,7 @@ mod tests {
         };
         // SAFETY: live resources.
         let (d, t) = unsafe { (host_depth.GetDesc(), twin.GetDesc()) };
-        // R24G8 typeless with depth, R8 typeless with unordered access.
-        assert_eq!((d.Format.0, d.Flags.0), (44, 2));
+        assert_eq!((d.Format.0, d.Flags.0), (typeless, 2));
         assert_eq!((t.Format.0, t.Flags.0), (60, 4));
 
         // Four rows of four texels, 256 bytes apart as copies place them.
@@ -3424,13 +3430,12 @@ mod tests {
         };
         // SAFETY: live resources.
         let (d, t) = unsafe { (host_depth.GetDesc(), plane.GetDesc()) };
-        // R24G8 typeless with depth, R16 typeless with unordered access.
-        assert_eq!((d.Format.0, d.Flags.0), (44, 2));
+        // R32G8X24 typeless with depth, R16 typeless with unordered access.
+        assert_eq!((d.Format.0, d.Flags.0), (19, 2));
         assert_eq!((t.Format.0, t.Flags.0), (53, 4));
 
         // Four rows of four class numbers (16 bits each), 256 bytes apart
-        // as copies place them. 128 and 129 are the classes whose 24-bit
-        // depth lies nearest a half step.
+        // as copies place them.
         const CLASSES: [u16; 16] = [
             8, 65, 128, 129, 65, 8, 129, 128, 0, 255, 65, 64, 129, 130, 8, 65,
         ];
@@ -3574,9 +3579,7 @@ mod tests {
         // The draws: a triangle over the target at the depth of a class,
         // as the title's lighting places its rectangles.
         const SOURCE: &str = r#"
-#define RS "RootConstants(num32BitConstants = 1, b0)"
 cbuffer Drawn : register(b0) { uint number; };
-[RootSignature(RS)]
 float4 corner(uint i : SV_VertexID) : SV_Position {
     float z = float(number) * asfloat(0x37800080);
     return float4(float(i & 1) * 4.0 - 1.0, float(i >> 1) * 4.0 - 1.0, z, 1.0);
@@ -3593,10 +3596,23 @@ float4 lit() : SV_Target { return 1.0; }
         blend.RenderTarget[0].RenderTargetWriteMask = 0xf;
         let mut formats = [DXGI_FORMAT(0); 8];
         formats[0] = DXGI_FORMAT(61);
+        let signature = crate::host::helper_root_signature(
+            &host.device,
+            &[D3D12_ROOT_PARAMETER1 {
+                ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+                Anonymous: D3D12_ROOT_PARAMETER1_0 {
+                    Constants: D3D12_ROOT_CONSTANTS {
+                        Num32BitValues: 1,
+                        ..Default::default()
+                    },
+                },
+                ShaderVisibility: D3D12_SHADER_VISIBILITY_VERTEX,
+            }],
+            &[],
+        )
+        .unwrap();
         // SAFETY: plain creation; the description points at live data.
-        let (signature, pipeline) = unsafe {
-            let signature: ID3D12RootSignature =
-                host.device.CreateRootSignature(0, &vs[..]).unwrap();
+        let pipeline: ID3D12PipelineState = unsafe {
             let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&signature),
                 VS: code(&vs[..]),
@@ -3619,16 +3635,14 @@ float4 lit() : SV_Target { return 1.0; }
                 PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
                 NumRenderTargets: 1,
                 RTVFormats: formats,
-                DSVFormat: DXGI_FORMAT(45),
+                DSVFormat: DXGI_FORMAT(20),
                 SampleDesc: DXGI_SAMPLE_DESC {
                     Count: 1,
                     Quality: 0,
                 },
                 ..Default::default()
             };
-            let pipeline: ID3D12PipelineState =
-                host.device.CreateGraphicsPipelineState(&desc).unwrap();
-            (signature, pipeline)
+            host.device.CreateGraphicsPipelineState(&desc).unwrap()
         };
         let state = host_copy(depth).unwrap().state.load(Relaxed);
         let state = D3D12_RESOURCE_STATES(state as i32);
@@ -3636,7 +3650,7 @@ float4 lit() : SV_Target { return 1.0; }
         let depth_view = host.dsv(
             host_depth,
             Some(&D3D12_DEPTH_STENCIL_VIEW_DESC {
-                Format: DXGI_FORMAT(45),
+                Format: DXGI_FORMAT(20),
                 ViewDimension: D3D12_DSV_DIMENSION_TEXTURE2D,
                 ..Default::default()
             }),

@@ -507,6 +507,13 @@ commit `4e73e71` (PR #961). The mesh program's compute form uses
 spaces 8 and 9 so its bindings can share a root signature with the
 pixel stage. Native shader bindings keep their original spaces.
 
+### Float depth for console depth and stencil
+
+Adapted the host depth format from Marvisak/VIctory commit `98c654b`.
+Bittersweet's existing depth twin pass already writes the float used by
+the Series runtime's depth tests. The D32_FLOAT_S8X24 host format
+preserves that value, and the readback covers depth equality and stencil.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from
