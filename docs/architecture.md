@@ -36,6 +36,11 @@ in a separate index. Retirement and in-place invalidation remove stale
 aliases under the same cache lock; descriptors retain the buffer identity
 selected for their range.
 
+Each host descriptor heap owns the buffer references from its descriptor
+sweep. The sweep caches the combined address range for each buffer and
+recalculates it when an edge view moves inward or disappears. The existing
+periodic revalidation still revisits all buffer descriptors.
+
 ## Crates
 
 | Crate | Role |

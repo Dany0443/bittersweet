@@ -10,6 +10,8 @@
 use crate::object::{self, DESCRIPTOR_HEAP, E_INVALIDARG, HRESULT, Iid, Object, Table, This, guid};
 use crate::resource::{Memory, PAGEABLE_IIDS};
 
+#[cfg(any(windows, test))]
+pub(crate) mod buffer_sweep;
 #[cfg(windows)]
 pub(crate) mod host;
 

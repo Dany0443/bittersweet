@@ -490,3 +490,8 @@ Bittersweet keeps aliases in a separate index so they do not retain GPU
 buffers or change the existing idle-retirement ownership checks. This port
 covers lookup reuse, canonical accounting and alias invalidation; it does
 not add the PR's immediate reclamation of superseded windows.
+
+Descriptor sweep range caching follows [VIctory-RDNA commit
+`f8eb38d58232370cad1e44afb3896d208071b6ae`](https://github.com/XaviFortes/VIctory-RDNA/commit/f8eb38d58232370cad1e44afb3896d208071b6ae).
+This adaptation tracks bounds by buffer and ties the cache lifetime to
+the descriptor heap.
