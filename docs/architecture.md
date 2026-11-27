@@ -41,6 +41,11 @@ sweep. The sweep caches the combined address range for each buffer and
 recalculates it when an edge view moves inward or disappears. The existing
 periodic revalidation still revisits all buffer descriptors.
 
+The experimental native compute entry point reads a console pipeline
+description and wraps its program in an internal shader container. This
+reuses the existing shader translator and pipeline cache. It rejects
+descriptions it cannot read and shaders it cannot translate.
+
 ## Crates
 
 | Crate | Role |

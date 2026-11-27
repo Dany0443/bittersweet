@@ -195,6 +195,19 @@ pub(crate) extern "system" fn create(
     object::hand_out(ROOT_SIGNATURE, root, iid, &ROOT_SIGNATURE_IIDS, out)
 }
 
+#[cfg(windows)]
+pub(crate) fn blob_of(this: This) -> Option<Vec<u8>> {
+    let mut head = [0u8; 8];
+    if this.is_null() || !crate::host::read_into(this.cast(), &mut head) {
+        return None;
+    }
+    if usize::from_le_bytes(head) != FUNCTIONS.0.as_ptr() as usize {
+        return None;
+    }
+    // SAFETY: the caller retains the root signature named in the description.
+    Some(unsafe { &*this.cast::<RootSignature>() }.blob.clone())
+}
+
 extern "system" fn query(this: This, iid: *const Iid, out: *mut This) -> HRESULT {
     let found = object::is(iid, &ROOT_SIGNATURE_IIDS).then_some(this);
     object::answer(ROOT_SIGNATURE, iid, found, out)

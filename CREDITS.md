@@ -495,3 +495,9 @@ Descriptor sweep range caching follows [VIctory-RDNA commit
 `f8eb38d58232370cad1e44afb3896d208071b6ae`](https://github.com/XaviFortes/VIctory-RDNA/commit/f8eb38d58232370cad1e44afb3896d208071b6ae).
 This adaptation tracks bounds by buffer and ties the cache lifetime to
 the descriptor heap.
+
+The native compute description decoder and container writer are adapted
+from [DexNom/VIctory PR #64](https://github.com/DexNom/VIctory/pull/64)
+at `3f48fd433e1ebb058f1c27abba770cd26dd08e07`. Bittersweet bounds reads of
+the description and its blocks and validates the root layout before using
+its existing shader translator.

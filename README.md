@@ -90,6 +90,9 @@ checks without starting the title, run `cargo run -p bittersweet -- doctor`.
 Experimental: `VICTORY_WINDOW_REUSE=1` reuses overlapping buffer copies.
 It stays off by default while memory use and rendering are compared.
 
+For pipeline diagnostics, `VICTORY_NATIVE_COMPUTE=1` enables the experimental
+native compute creation method. Use it in a separate test run.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·
