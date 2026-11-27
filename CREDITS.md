@@ -321,3 +321,15 @@ Seven focused tests pass under GE-Proton11-14, including exhaustive
 comparison with the prior linear containment rule through promotion and
 reset. A local optimized microbenchmark of 20,000 lookups over 1,024
 ranges improves from 4.05 ms to 0.22 ms; title frame-rate gains are unverified.
+
+## Guarded copies under Wine
+
+The opt-in `VICTORY_DIRECT_COPY=1` path follows open
+[`PastiiJay/klbf-lab` PR 34](https://github.com/PastiiJay/klbf-lab/pull/34),
+head `ee53a8465ecbf1868d306511e4cff45ee63dbfe1`, including its tests.
+That PR attributes the base copy routine to BitWuehler's
+`fxceless/victory-fork` PR 154 and adds guard-page preservation.
+This adaptation reuses bittersweet's write-watch handler and falls back
+to the kernel copy if vectored-handler registration fails. The default
+path is unchanged. Synthetic Proton checks cover guarded, reserved and
+read-only pages, sparse remapping and write-watch visibility.
