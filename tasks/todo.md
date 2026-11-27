@@ -94,3 +94,13 @@ format checks. Record remaining inherited check failures accurately.
 - [ ] Every completed feature has a verified maintainer-authored commit.
 - [ ] Local title evidence supports every Linux status claim.
 - [ ] The full playable-mission goal remains open until task 9 is proven.
+
+## 10. Prebuild observed pipelines before the title loads
+
+Acceptance: completed entries are reusable only with the same translation
+settings and retained library; an opt-in run selects only previously used
+pipelines, with no whole-title fallback for an empty observed list. Run
+the prebuild and title with matching settings, then compare cold pipeline
+waits, intro timing and memory pressure. Keep derived caches outside Git.
+Dependencies: current shader ports. Scope: small independent cache-identity
+and prebuild-selection changes, committed after focused verification.

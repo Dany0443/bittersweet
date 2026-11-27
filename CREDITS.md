@@ -346,3 +346,13 @@ It also handles unsigned byte products and signed/unsigned saturation
 using Microsoft's documented DXIL packed-dot opcodes 163 and 164.
 Synthetic hardware readback under GE-Proton11-14 covers negative products,
 full-width accumulators, wrapping and both saturation bounds.
+
+## Settings-aware prebuild resumption
+
+Prebuild completion records reuse the runtime shader-cache fingerprint.
+This follows the fingerprint-scoped cache bookkeeping approach discussed
+in `DoubleGhosty/cool_fox` PR 54, head
+`b20312654b049dda333dbfa317dd1357af5fc6a3` (closed and unmerged when
+inspected). This tree's shader-pack prebuild has a different list format;
+it checks both translation identity and retained library size. Synthetic
+list tests cover changed settings, legacy records and library truncation.

@@ -172,3 +172,12 @@ Pipeline compilation retains its existing CPU-based worker default and
 256 MiB worker stacks. `VICTORY_PIPELINE_WORKERS` accepts an explicit count
 bounded to 1 through 64, allowing a single compiler during memory-constrained
 validation without changing shader output or compilation requirements.
+
+## Prebuild resumption identity
+
+The GPU shader cache exposes its translation fingerprint to the offline
+prebuild command. Completed pipeline lists record that fingerprint beside
+the library size. Resumption requires the current fingerprint to match
+and the library to retain at least its recorded size. Legacy lists without
+a fingerprint are rebuilt once. This keeps a different loop limit or
+translation setting from reusing the previous run's completion records.

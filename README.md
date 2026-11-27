@@ -43,6 +43,10 @@ memory can be prepared before reads begin. `VICTORY_DSTORAGE_HALF=1` enables
 the earlier submission behavior for diagnostic comparisons.
 `VICTORY_PIPELINE_WORKERS=1` limits concurrent pipeline compilation for
 memory-constrained runs. Unset, the existing worker-count default applies.
+Offline pipeline prebuild completion records now require the same shader
+translation fingerprint as the runtime. Existing unversioned completion
+lists are rebuilt once; use the same executable and translation settings
+for prebuilding and running.
 `VICTORY_DIRECT_COPY=1` opts into in-process title-memory copies under Wine.
 A vectored handler reports unreadable pages as copy failures and restores
 guard pages. The existing kernel-copy path remains the default.

@@ -322,8 +322,15 @@ fn save(dir: &Path, pending: &Mutex<Vec<String>>, listed: &mut Vec<String>) {
     let saved: Vec<String> = std::mem::take(&mut *lock(pending));
     pipeline::save_and_reopen_pipeline_cache();
     listed.extend(saved);
-    let Ok(meta) = std::fs::metadata(dir.join(LIBRARY_FILE)) else { return };
-    let text = format!("library {}\n{}\n", meta.len(), listed.join("\n"));
+    let Ok(meta) = std::fs::metadata(dir.join(LIBRARY_FILE)) else {
+        return;
+    };
+    let text = format!(
+        "library {}\ntranslator {}\n{}\n",
+        meta.len(),
+        fingerprint(),
+        listed.join("\n")
+    );
     let tmp = dir.join(LIST_FILE).with_extension("tmp");
     if std::fs::write(&tmp, text).is_ok() {
         let _ = std::fs::rename(&tmp, dir.join(LIST_FILE));
@@ -334,21 +341,34 @@ fn save(dir: &Path, pending: &Mutex<Vec<String>>, listed: &mut Vec<String>) {
 /// it is at least as big as when they were listed (a run saving the library
 /// after them only adds to it; one the driver refused starts empty).
 fn read_list(dir: &Path) -> HashSet<String> {
-    let (Ok(text), Ok(meta)) = (std::fs::read_to_string(dir.join(LIST_FILE)), std::fs::metadata(dir.join(LIBRARY_FILE)))
-    else {
+    let (Ok(text), Ok(meta)) = (
+        std::fs::read_to_string(dir.join(LIST_FILE)),
+        std::fs::metadata(dir.join(LIBRARY_FILE)),
+    ) else {
         return HashSet::new();
     };
-    listed(&text, meta.len())
+    listed(&text, meta.len(), &fingerprint())
 }
 
 /// [`read_list`]'s reading of the list file `text` for a library of `len` bytes.
-fn listed(text: &str, len: u64) -> HashSet<String> {
+fn listed(text: &str, len: u64, fingerprint: &str) -> HashSet<String> {
     let mut lines = text.lines();
-    let size = lines.next().and_then(|l| l.strip_prefix("library ")).and_then(|n| n.parse::<u64>().ok());
-    if size.is_none_or(|size| len < size) {
+    let size = lines
+        .next()
+        .and_then(|l| l.strip_prefix("library "))
+        .and_then(|n| n.parse::<u64>().ok());
+    if size.is_none_or(|size| len < size)
+        || lines.next().and_then(|l| l.strip_prefix("translator ")) != Some(fingerprint)
+    {
         return HashSet::new();
     }
     lines.filter(|l| !l.is_empty()).map(str::to_owned).collect()
+}
+
+fn fingerprint() -> String {
+    blake3::Hash::from(*victory_gpu::shader_cache::translation_fingerprint())
+        .to_hex()
+        .to_string()
 }
 
 /// The keys a file lists, one a line (none without the file).
@@ -396,11 +416,13 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_list_holds_while_the_library_only_grows() {
-        let text = "library 100\na\nb\n";
-        assert_eq!(super::listed(text, 100).len(), 2);
-        assert_eq!(super::listed(text, 150).len(), 2);
-        assert!(super::listed(text, 99).is_empty());
-        assert!(super::listed("garbage\na\n", 100).is_empty());
+    fn completed_entries_require_matching_translation_and_library() {
+        let text = "library 100\ntranslator build-a\na\nb\n";
+        assert_eq!(super::listed(text, 100, "build-a").len(), 2);
+        assert_eq!(super::listed(text, 150, "build-a").len(), 2);
+        assert!(super::listed(text, 99, "build-a").is_empty());
+        assert!(super::listed(text, 100, "build-b").is_empty());
+        assert!(super::listed("library 100\na\nb\n", 100, "build-a").is_empty());
+        assert!(super::listed("garbage\na\n", 100, "build-a").is_empty());
     }
 }
