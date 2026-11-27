@@ -27,12 +27,15 @@ Further tests with GE-Proton11-14 (vkd3d-proton revision
 GE-Proton11-12. Explicit root signatures repair the memory-comparison,
 simple-scaling and output-packing helpers under Wine. With
 `VICTORY_FFX_SIMPLE=1`, runs on 2026-11-26 presented changing 3D scenes
-and overlaid credits. The complete console upscaler remains incomplete;
+and overlaid credits. The packed-byte dot port raises host-pipeline creation from seven to 13
+of 20 captured compute programs. The console upscaler remains incomplete;
 simple scaling has no temporal reconstruction. Lighting faults remain.
 
 On 2026-11-27 the rebuilt memory probe verified coherent CPU/GPU reads
 and writes for private memory. File-mapping imports opened successfully
-but failed actual data checks. They cannot replace copies on this setup.
+but failed actual data checks. Importing a mapped view by its CPU address
+also failed GPU reads, copy writes and shader writes. Both mapped-memory
+paths must retain copies on this setup.
 The opt-in guarded in-process copy path passes 23 host tests under Proton
 both enabled and disabled. In an isolated benchmark, 1,000 64 KiB writes
 took 1.09 ms in process versus 24.67 ms through the kernel call. This is

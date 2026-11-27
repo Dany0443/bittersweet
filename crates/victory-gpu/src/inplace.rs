@@ -711,6 +711,28 @@ unsafe fn section(p: &mut Probe, rig: &mut Rig) {
         // Pages 4..12 of the section at the placeholder's start.
         mem::VirtualFree(hole.cast(), 8 * K64, mem::MEM_RELEASE | mem::MEM_PRESERVE_PLACEHOLDER);
         let view = mem::MapViewOfFile3(handle, process, hole.cast(), (4 * K64) as u64, 8 * K64, mem::MEM_REPLACE_PLACEHOLDER, mem::PAGE_READWRITE, std::ptr::null_mut(), 0);
+        if !view.Value.is_null() {
+            let memory = hole.add(K64);
+            let bytes = 2 * K64;
+            let imported = open(&rig.device, From::Part(memory as usize, bytes));
+            p.lines.push(format!("a mapped view opened by its CPU address (OpenExistingHeapFromAddress1): {}", hr(&imported)));
+            if let Ok(heap) = imported {
+                let buffer = place(&rig.device, &heap, 0, bytes as u64);
+                p.lines.push(format!("  a buffer placed over the view: {}", hr(&buffer)));
+                if let Ok(buffer) = buffer {
+                    fill(memory, bytes, 11);
+                    let reads = rig.fetch(&buffer, 0, bytes).is_ok_and(|got| same(memory, &got));
+                    fill(memory, bytes, 19);
+                    let changed = rig.fetch(&buffer, 0, bytes).is_ok_and(|got| same(memory, &got));
+                    let new: Vec<u8> = (0..K64).map(|i| (i as u8) ^ 0x69).collect();
+                    let writes = rig.store(&buffer, 0, &new).is_ok() && same(memory, &new);
+                    memory.cast::<[u32; 3]>().write([40, 2, 0]);
+                    let shade = rig.shade(buffer.GetGPUVirtualAddress());
+                    let shader_writes = shade.is_ok() && memory.cast::<[u32; 3]>().read() == [40, 2, 42];
+                    p.lines.push(format!("  address-imported view: GPU reads {reads}, later CPU writes visible {changed}, GPU copy writes {writes}, GPU shader writes {shader_writes} ({})", hr(&shade)));
+                }
+            }
+        }
         let opened = open(&rig.device, From::Section(handle as usize));
         p.lines.push(format!("a section made committed (OpenExistingHeapFromFileMapping): {}", hr(&opened)));
         let mut unmapped = false;
