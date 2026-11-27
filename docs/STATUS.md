@@ -95,8 +95,14 @@ A synthetic regression reproduced globally coherent root-UAV loads being
 rejected as typed root views. The translator now preserves coherence in
 both handle properties and resource metadata, with mixed load/store DXIL
 validation under Proton. The local structure-builder DLL now creates all
-52 offline pipelines, up from 48. This does not verify builder execution,
-lighting correctness or a title performance gain; the builder remains opt-in.
+52 offline pipelines, up from 48. A quarantined title test then passed the
+all-or-none guard with 53 runtime pipelines ready. The memory monitor
+stopped that run at 55 seconds. A baseline with the builder disabled and
+captures off also hit memory pressure, after 115 seconds. Its early world
+samples were about 1.7 to 2.5 fps, with 280 to 400 ms preparing submissions,
+520 to 890 MB of buffer copies per frame and 70 to 135 ms on the GPU.
+These runs do not establish a lighting fix, a performance gain or sustained
+builder correctness; the builder remains opt-in.
 
 ## What is missing
 
