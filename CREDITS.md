@@ -362,3 +362,12 @@ Scalar condition-code operands follow `DoubleGhosty/cool_fox` main
 to VIctory commit `0b35b7f`. The existing scalar flag path supplies the
 Boolean, converted to the instruction's integer operand. Synthetic GPU
 readback checks both comparison results and arithmetic carry flags.
+
+## Level queries on array textures
+
+The LOD query signature change follows `DoubleGhosty/cool_fox` commit
+`caec503049efc4241b254af11934f476f13d99fe` by superboynick. A level
+query writes only the spatial coordinates of an array texture, so the
+array slice now stays undefined instead of being passed as a third
+coordinate the host validator rejects. A unit test pins the coordinate
+count for queries and ordinary texture operations.

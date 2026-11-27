@@ -10411,7 +10411,11 @@ impl<'a> Lower<'a> {
             if kind == 5 && (*unorm || op == 81) {
                 return Err("a cube sample with texel coordinates or a level query");
             }
-            for (k, slot) in cs.iter_mut().enumerate().take(coords) {
+            // A level query takes the spatial coordinates only: an array
+            // slice in the third slot would be read as an out-of-bounds
+            // coordinate the validator rejects. Leave it undef.
+            let used_coords = query_coords(op, coords, spatial);
+            for (k, slot) in cs.iter_mut().enumerate().take(used_coords) {
                 let x = addr_packed(self, coord_base, k)?;
                 *slot = to_float(self, x);
             }
@@ -12017,6 +12021,12 @@ impl<'a> Lower<'a> {
     }
 }
 
+/// The coordinates a texture operation reads: a level query (`op` 81)
+/// takes the spatial ones only, not an array slice.
+fn query_coords(op: u32, coords: usize, spatial: usize) -> usize {
+    if op == 81 { spatial } else { coords }
+}
+
 /// The DXIL interpolation mode of a kind of barycentrics (none for the
 /// pull model).
 fn interp_mode(kind: Barycentric) -> Option<u8> {
@@ -12160,7 +12170,7 @@ mod tests {
         lower_with(&code, layout(), structured).expect("a structured buffer still lowers");
     }
 
-    use super::{Lowered, Numeric, Parts, buffer_format, half_shift, lower};
+    use super::{Lowered, Numeric, Parts, buffer_format, half_shift, lower, query_coords};
     use crate::native::{
         ComputeIo, HwStage, NativeProgram, ResourceType, RootParam, RootType, StageIo, UsedResource,
     };
@@ -12423,6 +12433,17 @@ mod tests {
         // host to invalidate its cached view of a buffer.
         assert!(lowers(&[0xE1C4_0000, 0, S_ENDPGM], 0).is_ok(), "buffer_gl0_inv");
         assert!(lowers(&[0xE1C8_0000, 0, S_ENDPGM], 0).is_ok(), "buffer_gl1_inv");
+    }
+
+    #[test]
+    fn a_level_query_leaves_the_array_slice_out_of_its_coordinates() {
+        // A 2D array's level query writes only x and y; the third slot must
+        // stay undef rather than take the layer index (op 81).
+        assert_eq!(query_coords(81, 3, 2), 2);
+        assert_eq!(query_coords(81, 2, 2), 2);
+        // Every other texture operation still reads the whole coordinate.
+        assert_eq!(query_coords(1, 3, 2), 3);
+        assert_eq!(query_coords(63, 3, 2), 3);
     }
 
     #[test]
