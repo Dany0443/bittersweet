@@ -1639,12 +1639,29 @@ mod tests {
     #[test]
     fn file_reads_keep_all_offset_bits_above_four_gib() {
         use std::io::{Seek, SeekFrom, Write};
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::IO::DeviceIoControl;
+        use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sparse-high-offset.bin");
         let offset = (1u64 << 36) + 0x1234;
         let marker = b"high-offset synthetic marker";
         let mut writer = std::fs::File::create(&path).unwrap();
+        let mut returned = 0;
+        let sparse = unsafe {
+            DeviceIoControl(
+                writer.as_raw_handle(),
+                FSCTL_SET_SPARSE,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(sparse, 0, "{}", std::io::Error::last_os_error());
         writer.set_len(offset + marker.len() as u64).unwrap();
         writer.seek(SeekFrom::Start(offset)).unwrap();
         writer.write_all(marker).unwrap();

@@ -108,4 +108,8 @@ and prebuild-selection changes, committed after focused verification.
 The `--early-only` CLI boundary passes focused tests. A manual integration
 check with an empty observed list scanned the local shader pack but
 scheduled and created zero pipelines. The normal observed-list prebuild
-and subsequent title comparison remain pending.
+and title comparison have also run. A warmup loaded 1,992 observed
+pipelines from the host library. The subsequent title run reached visible
+world rendering with no pipelines pending, but remained below 1 fps.
+Prebuilding has not established the requested world frame rate or intro
+timing.

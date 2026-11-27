@@ -37,6 +37,8 @@ pub mod fence;
 pub mod frame;
 #[cfg(windows)]
 mod host;
+#[cfg(all(windows, feature = "diagnostics"))]
+mod material_trace;
 #[cfg(windows)]
 mod indirect;
 #[cfg(windows)]

@@ -386,3 +386,35 @@ refused with a named reason rather than failing pipeline creation.
 `VICTORY_BARYCENTRICS=0` selects the fallback before a device exists for
 offline translation. The capability is part of the shader cache
 fingerprint.
+
+## Experimental Wine mapping server
+
+The private Linux runtime experiment uses the mapping view-tree patch from
+[DoubleGhosty/cool_fox PR 71](https://github.com/DoubleGhosty/cool_fox/pull/71),
+head `856c6cae04539207fe6eb37ecb7806d0183f5c8f`, merged into upstream main.
+The server is built outside this repository from GE-Proton11-14's Wine base
+`a47c73f52fd7b2efafc1c560710f3a5099ae51e0`, its release patches and
+wine-staging `6cc805ea57132eeaf44764e9213823c9b8d0d300`. The complete release
+protocol is regenerated before testing. Synthetic mapping churn and GPU
+readback pass; title frame times improve but remain far from playable.
+No Wine sources or binaries are distributed in this tree by this experiment.
+
+## Character material diagnostics
+
+The bounded character material readback follows open
+[DexNom/VIctory PR 49](https://github.com/DexNom/VIctory/pull/49), head
+`96758952e6852fadfbb8e99d514b5d6660da447f`. This adaptation reads the two
+deferred character layouts from the bound GPU buffer and reports current
+descriptor residency. It does not yet port the PR's texture-demand or
+typed-view recovery behavior. Diagnostics retain at most eight pending
+readbacks, cancel them on list reset and validate the source before reporting.
+
+## Resource-free structure view addresses
+
+Ray-tracing structure view addresses follow `fxceless/victory-fork` commit
+`9a9091d180f044726463d3db819808086daeebae`. Structure SRVs carry their
+location in descriptor words four and five even without a resource object.
+The adaptation preserves ordinary buffer offsets and routes both address
+words through graphics and compute bindings. Synthetic tests reproduce the
+previous zero address and verify the correction. This port does not enable
+the experimental structure builder or establish title ray-tracing results.

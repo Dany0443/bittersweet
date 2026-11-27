@@ -41,6 +41,12 @@ The blend-state regression tests pass under Proton-GE; GPU execution is unverifi
 DirectStorage partial batches wait for explicit submission so destination
 memory can be prepared before reads begin. `VICTORY_DSTORAGE_HALF=1` enables
 the earlier submission behavior for diagnostic comparisons.
+
+A diagnostics build supports `VICTORY_MATERIAL_TEXTURE_TRACE=1` alongside
+`VICTORY_CAPTURE_WORLD=1` and an external `VICTORY_CAPTURE` directory.
+Selected world captures report the deferred characters' GPU material
+indices and descriptor residency. This bounded probe does not change
+texture upload scheduling.
 `VICTORY_PIPELINE_WORKERS=1` limits concurrent pipeline compilation for
 memory-constrained runs. Unset, the existing worker-count default applies.
 Offline pipeline prebuild completion records now require the same shader

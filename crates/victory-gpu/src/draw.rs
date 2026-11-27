@@ -755,8 +755,8 @@ impl State {
         // The title address of the buffer view at that dword of the table.
         let address = match self.roots_ref(compute).get(usize::from(slot)) {
             Some(&Root::Table(table)) => crate::descriptor::view(table + u64::from(dword) * 4)
-                .and_then(|view| crate::descriptor::host::buffer_range(&view))
-                .map_or(0, |range| range.0),
+                .and_then(|view| crate::descriptor::host::view_address(&view))
+                .unwrap_or(0),
             _ => 0,
         };
         if address == 0 {
@@ -1008,6 +1008,31 @@ impl State {
                         Some(&(_, offset)) => offset,
                         None => self.user_value(compute, u.slot, u.root, u.dword),
                     };
+                }
+                #[cfg(feature = "diagnostics")]
+                if !compute
+                    && crate::material_trace::enabled()
+                    && let Some(u) = t
+                        .host
+                        .user_data
+                        .iter()
+                        .find(|u| u.index == 14 && u.root == RootType::Constants)
+                    && t.host
+                        .user_data
+                        .iter()
+                        .any(|u| u.index == 8 && u.root == RootType::Table && u.slot == 0)
+                    && let Some(&Root::Table(table)) = self.roots_ref(compute).first()
+                    && let Some(heap) = self.heap_of(table)
+                    && !heap.samplers()
+                    && values.get(8).copied().map(u64::from) == table.checked_sub(heap.start)
+                {
+                    crate::material_trace::record(
+                        list,
+                        heap,
+                        table,
+                        self.user_value(compute, u.slot, u.root, u.dword),
+                        &stage.shader.hash,
+                    );
                 }
                 // SAFETY: an open list; `values` covers the parameter.
                 unsafe {
@@ -1577,6 +1602,8 @@ impl State {
         // Slots whose texture's memory the runtime mapped, unmapped or
         // wrote since the last pass are due again.
         host.texture_slots_remapped(frame);
+        #[cfg(feature = "diagnostics")]
+        crate::material_trace::report(heap, host, frame);
         host.texture_sweep(heap, frame);
         let (due, census) = host.texture_slots_due(frame, 4096);
         HEAP_TEXTURES_WAITING.store(census[0], Ordering::Relaxed);
@@ -3037,5 +3064,40 @@ pub(crate) fn depth_bounds(list: &HostList, min: f32, max: f32) {
     {
         // SAFETY: this is an open list on a device that supports depth bounds.
         unsafe { list.OMSetDepthBounds(min, max) };
+    }
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn structure_view_without_resource_supplies_both_address_words() {
+        use victory_shader::emit::USER_VIEW_ADDRESS;
+        let mut slots = [0u32; 32];
+        let table = slots.as_mut_ptr() as u64;
+        let address = 0x9_abcd_1240u64;
+        let mut desc = [0u32; 10];
+        desc[1] = 11;
+        desc[4] = address as u32;
+        desc[5] = (address >> 32) as u32;
+        crate::descriptor::create_srv(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &desc,
+            table + 16,
+        );
+        for compute in [false, true] {
+            let mut state = State::default();
+            state.set_table(compute, 3, table);
+            assert_eq!(
+                state.host_word(compute, USER_VIEW_ADDRESS, 3, 4, None),
+                address as u32
+            );
+            assert_eq!(
+                state.host_word(compute, USER_VIEW_ADDRESS + 1, 3, 4, None),
+                (address >> 32) as u32
+            );
+        }
     }
 }

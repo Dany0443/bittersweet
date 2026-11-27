@@ -27,7 +27,7 @@ Further tests with GE-Proton11-14 (vkd3d-proton revision
 GE-Proton11-12. Explicit root signatures repair the memory-comparison,
 simple-scaling and output-packing helpers under Wine. With
 `VICTORY_FFX_SIMPLE=1`, runs on 2026-11-26 presented changing 3D scenes
-and overlaid credits. The packed-byte dot port raises host-pipeline creation from seven to 13
+and overlaid credits. The packed-byte dot port raises host-pipeline creation from seven to 14
 of 20 captured compute programs. The console upscaler remains incomplete;
 simple scaling has no temporal reconstruction. Lighting faults remain.
 
@@ -47,8 +47,49 @@ cold world loading, but large uploads, pipeline creation and memory
 pressure still produced multi-second frames. A later sample with no
 pipelines pending remained about 0.9 fps. No sustained title frame-rate
 improvement, player-controlled mission or corrected intro timing is
-established. A fresh window capture was unavailable because the title
-window was unmapped; the earlier visible-scene evidence remains separate.
+established. The prior window capture was unavailable because the title window was
+unmapped. Diagnostics now read back composed presentation as well as direct
+copies; a synthetic two-layer hardware test verifies both layer colors.
+The earlier visible-scene evidence remains separate.
+
+A subsequent 176-second title test verified the composed capture path in
+the real runtime: saved frames show the character, street and vehicles.
+World samples remained about 0.2 to 0.7 fps with no pipelines pending.
+Memory-mapping changes took roughly 979 ms per frame during streaming,
+and process samples found wineserver using 70 to 90 percent of one core.
+These measurements motivate testing the current cool_fox Wine mapping
+optimization; they do not establish its benefit here. An isolated server
+built from GE-Proton's base Wine revision failed the client protocol check
+and was not used for a title test. Reproducing GE-Proton's release patches
+and regenerating the protocol resolved that mismatch.
+
+The matching private server with cool_fox PR 71's mapping view tree passes
+a 16,384-view synthetic test, including data tags, shuffled unmaps and
+overlap rejection. Mapping and unmapping took 500 ms versus 1,032 ms with
+the stock server. A 226-second title comparison with the same executable
+and graphics settings produced substantial 3D samples around 2 to 3 fps;
+mapping time generally fell to single or tens of milliseconds per frame.
+Later multi-second hitches, dropped draws and dark character materials
+remain. These are advancing scenes, not a fixed-camera benchmark or proof
+of mission playability. No device-removal fault occurred before the manual
+stop, which does not establish stability. The original Proton installation
+is unchanged; this server remains an external diagnostic build.
+
+A bounded GPU material probe recorded 119 field observations in a later
+158-second test. All sampled records used the regular deferred character
+shader, and their source buffers still matched when reported. Fields zero
+and four had resident views in all 17 records; several later fields were
+null. This does not prove that missing color textures cause the black
+characters, or that resident resources contain correct texels. Sampling now
+reserves capacity for both character shader variants. The probe does not
+change upload scheduling, and the character rendering fault remains open.
+
+A prebuilt run reached world rendering with no pipelines pending and still
+ran around 0.7 to 1 fps. It stopped after 164 seconds with a RADV GPUVM
+read fault and device removal. A breadcrumb-enabled diagnostic run
+continued for 422 seconds before being stopped manually without that
+fault, but was slower. The failure remains unresolved; this does not
+establish stability. The Proton build reports no D3D12 debug layer.
 
 ## What is missing
 
