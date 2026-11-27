@@ -1741,6 +1741,21 @@ fn element_size(desc: &D3D12_SHADER_RESOURCE_VIEW_DESC) -> u64 {
     }
 }
 
+pub(crate) fn view_address(view: &View) -> Option<u64> {
+    let words = match view {
+        View::Shader(_, Some(desc)) => Some(&desc[..]),
+        View::Placed(false, _, desc) => Some(&desc[..10]),
+        _ => None,
+    };
+    if let Some(words) = words
+        && words[1] == D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE.0 as u32
+    {
+        let address = u64::from(words[4]) | u64::from(words[5]) << 32;
+        return (address != 0).then_some(address);
+    }
+    buffer_range(view).map(|range| range.0)
+}
+
 /// The title memory a buffer shader or unordered access view reads: its
 /// address and length.
 pub(crate) fn buffer_range(view: &View) -> Option<(u64, u64)> {
@@ -2561,6 +2576,40 @@ mod tests {
     use super::*;
 
     /// Only typed integer buffer views carry the integer-kind metadata.
+    #[test]
+    fn structure_addresses_use_locations_and_buffer_addresses_keep_their_offsets() {
+        let mut words = [0u32; 10];
+        words[1] = 11;
+        words[4] = 0xabcd_1240;
+        words[5] = 9;
+        assert_eq!(
+            view_address(&View::Shader(0, Some(words))),
+            Some(0x9_abcd_1240)
+        );
+        let mut placed = [0u32; 16];
+        placed[..10].copy_from_slice(&words);
+        assert_eq!(
+            view_address(&View::Placed(false, [0; 14], placed)),
+            Some(0x9_abcd_1240)
+        );
+        words[4] = 0;
+        words[5] = 0;
+        assert_eq!(view_address(&View::Shader(0, Some(words))), None);
+        let mut resource = [0u32; 14];
+        resource[0] = 1;
+        placed.fill(0);
+        placed[0] = 39;
+        placed[1] = 1;
+        placed[4] = 2;
+        placed[6] = 4;
+        placed[8] = 1;
+        placed[10] = 0x1000;
+        let view = View::Placed(false, resource, placed);
+        assert_eq!(buffer_range(&view), Some((0x1008, 16)));
+        assert_eq!(view_address(&view), Some(0x1008));
+        assert_eq!(view_address(&View::Sampler([0; 13])), None);
+    }
+
     #[test]
     fn integer_typed_buffer_views_are_marked_in_the_stride_table_word() {
         use victory_shader::emit::{VIEW_INTEGER, VIEW_SIGNED};

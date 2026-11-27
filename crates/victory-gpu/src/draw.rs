@@ -755,8 +755,8 @@ impl State {
         // The title address of the buffer view at that dword of the table.
         let address = match self.roots_ref(compute).get(usize::from(slot)) {
             Some(&Root::Table(table)) => crate::descriptor::view(table + u64::from(dword) * 4)
-                .and_then(|view| crate::descriptor::host::buffer_range(&view))
-                .map_or(0, |range| range.0),
+                .and_then(|view| crate::descriptor::host::view_address(&view))
+                .unwrap_or(0),
             _ => 0,
         };
         if address == 0 {
@@ -3064,5 +3064,40 @@ pub(crate) fn depth_bounds(list: &HostList, min: f32, max: f32) {
     {
         // SAFETY: this is an open list on a device that supports depth bounds.
         unsafe { list.OMSetDepthBounds(min, max) };
+    }
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn structure_view_without_resource_supplies_both_address_words() {
+        use victory_shader::emit::USER_VIEW_ADDRESS;
+        let mut slots = [0u32; 32];
+        let table = slots.as_mut_ptr() as u64;
+        let address = 0x9_abcd_1240u64;
+        let mut desc = [0u32; 10];
+        desc[1] = 11;
+        desc[4] = address as u32;
+        desc[5] = (address >> 32) as u32;
+        crate::descriptor::create_srv(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &desc,
+            table + 16,
+        );
+        for compute in [false, true] {
+            let mut state = State::default();
+            state.set_table(compute, 3, table);
+            assert_eq!(
+                state.host_word(compute, USER_VIEW_ADDRESS, 3, 4, None),
+                address as u32
+            );
+            assert_eq!(
+                state.host_word(compute, USER_VIEW_ADDRESS + 1, 3, 4, None),
+                (address >> 32) as u32
+            );
+        }
     }
 }

@@ -384,3 +384,13 @@ deferred character layouts from the bound GPU buffer and reports current
 descriptor residency. It does not yet port the PR's texture-demand or
 typed-view recovery behavior. Diagnostics retain at most eight pending
 readbacks, cancel them on list reset and validate the source before reporting.
+
+## Resource-free structure view addresses
+
+Ray-tracing structure view addresses follow `fxceless/victory-fork` commit
+`9a9091d180f044726463d3db819808086daeebae`. Structure SRVs carry their
+location in descriptor words four and five even without a resource object.
+The adaptation preserves ordinary buffer offsets and routes both address
+words through graphics and compute bindings. Synthetic tests reproduce the
+previous zero address and verify the correction. This port does not enable
+the experimental structure builder or establish title ray-tracing results.
