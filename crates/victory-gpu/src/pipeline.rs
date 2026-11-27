@@ -65,6 +65,8 @@ pub(crate) struct Shader {
     container: Vec<u8>,
     #[cfg(windows)]
     translated: OnceLock<Option<Translated>>,
+    #[cfg(windows)]
+    mesh_fallback: OnceLock<Option<victory_shader::emit::MeshFallback>>,
 }
 
 impl std::fmt::Debug for Shader {
@@ -122,6 +124,8 @@ impl Shader {
             container: bytes.to_vec(),
             #[cfg(windows)]
             translated: OnceLock::new(),
+            #[cfg(windows)]
+            mesh_fallback: OnceLock::new(),
         }
     }
 }
@@ -177,6 +181,21 @@ impl Shader {
                 done.ok()
             })
             .as_ref()
+    }
+}
+
+#[cfg(windows)]
+impl Shader {
+    /// The mesh shader translated to compute and passthrough vertex stages.
+    pub(crate) fn mesh_fallback(&self) -> Option<&victory_shader::emit::MeshFallback> {
+        self.mesh_fallback.get_or_init(|| {
+            let result = crate::shader_cache::mesh_fallback(&self.container);
+            match &result {
+                Ok(f) => tracing::info!(hash = %self.hash, layout = ?f.layout, expanded = f.expanded, "mesh shader translated as compute"),
+                Err(e) => tracing::warn!(hash = %self.hash, error = %e, "mesh shader cannot use the compute fallback"),
+            }
+            result.ok()
+        }).as_ref()
     }
 }
 

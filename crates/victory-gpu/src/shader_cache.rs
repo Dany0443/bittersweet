@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use victory_pipeline::{Cache, Converter};
-use victory_shader::emit::{HostShader, StaticSampler, UserData};
+use victory_shader::emit::{HostShader, MeshFallback, MeshLayout, StaticSampler, UserData};
 use victory_shader::resource::RootIndexedView;
 use victory_shader::{HwStage, RootType};
 
@@ -166,6 +166,7 @@ fn cached(
 }
 
 const MAGIC: &[u8; 4] = b"VSH1";
+const FALLBACK_MAGIC: &[u8; 4] = b"VMF1";
 const STAGES: [HwStage; 8] = [
     HwStage::Ls,
     HwStage::Hs,
@@ -337,6 +338,76 @@ fn decode(bytes: &[u8]) -> Option<HostShader> {
     })
 }
 
+/// Translates and caches the compute and vertex programs used when the host
+/// cannot execute native mesh shaders.
+pub(crate) fn mesh_fallback(container: &[u8]) -> Result<MeshFallback, String> {
+    let translate = |c: &[u8]| victory_shader::emit::translate_mesh_as_compute(c).map_err(|e| e.to_string());
+    let Some(cache) = CACHE.get() else { return translate(container) };
+    let input = [translation_fingerprint().as_slice(), container].concat();
+    let converter = FallbackTranslate(AtomicBool::new(false));
+    for _ in 0..2 {
+        let path = cache.get_or_convert(&converter, &input).map_err(|e| format!("{e:#}"))?;
+        if let Some(fallback) = std::fs::read(&path).ok().and_then(|b| decode_fallback(&b)) {
+            MISSES.fetch_add(u64::from(converter.0.load(Ordering::Relaxed)), Ordering::Relaxed);
+            HITS.fetch_add(u64::from(!converter.0.load(Ordering::Relaxed)), Ordering::Relaxed);
+            return Ok(fallback);
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    translate(container)
+}
+
+struct FallbackTranslate(AtomicBool);
+impl Converter for FallbackTranslate {
+    fn id(&self) -> &'static str { "shader.mesh-fallback" }
+    fn version(&self) -> u32 { 1 }
+    fn convert(&self, input: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.0.store(true, Ordering::Relaxed);
+        let fallback = victory_shader::emit::translate_mesh_as_compute(&input[32..]).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        Ok(encode_fallback(&fallback))
+    }
+}
+
+fn encode_fallback(f: &MeshFallback) -> Vec<u8> {
+    let mut out = FALLBACK_MAGIC.to_vec();
+    for shader in [&f.compute, &f.vertex] {
+        let bytes = encode(shader);
+        out.extend((bytes.len() as u32).to_le_bytes());
+        out.extend(bytes);
+    }
+    for value in [u32::from(f.expanded), f.layout.threads, f.layout.max_vertices,
+        f.layout.max_primitives, f.layout.vertex_dwords, f.layout.primitive_dwords] {
+        out.extend(value.to_le_bytes());
+    }
+    out
+}
+
+fn decode_fallback(bytes: &[u8]) -> Option<MeshFallback> {
+    let mut rest = bytes.strip_prefix(FALLBACK_MAGIC)?;
+    let mut take = |n: usize| -> Option<&[u8]> {
+        let (head, tail) = rest.split_at_checked(n)?;
+        rest = tail;
+        Some(head)
+    };
+    let word = |b: &[u8]| Some(u32::from_le_bytes(b.try_into().ok()?));
+    let compute_len = word(take(4)?)? as usize;
+    let compute = decode(take(compute_len)?)?;
+    let vertex_len = word(take(4)?)? as usize;
+    let vertex = decode(take(vertex_len)?)?;
+    let mut words = [0u32; 6];
+    for value in &mut words { *value = word(take(4)?)?; }
+    let [expanded, threads, max_vertices, max_primitives, vertex_dwords, primitive_dwords] = words;
+    let layout = MeshLayout { threads, max_vertices, max_primitives, vertex_dwords, primitive_dwords };
+    let output_bytes = layout.bytes(1).into_iter().sum::<u64>();
+    (rest.is_empty() && expanded <= 1 && compute.stage == HwStage::Cs
+        && vertex.stage == HwStage::Vs && threads > 0 && threads <= 128
+        && max_vertices <= 256 && max_primitives <= 256 && output_bytes <= 32 * 1024)
+        .then_some(MeshFallback {
+        compute, vertex, expanded: expanded == 1,
+        layout,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,5 +494,21 @@ mod tests {
         assert_eq!(decode(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode(&[bytes.as_slice(), &[0]].concat()), None);
         assert_eq!(decode(b"VSH0"), None);
+    }
+
+    #[test]
+    fn mesh_fallback_entries_round_trip_and_reject_damage() {
+        let host = shader();
+        let fallback = MeshFallback {
+            compute: HostShader { stage: HwStage::Cs, ..host.clone() },
+            vertex: HostShader { stage: HwStage::Vs, ..host },
+            expanded: true,
+            layout: MeshLayout { threads: 64, max_vertices: 64, max_primitives: 126, vertex_dwords: 12, primitive_dwords: 4 },
+        };
+        let bytes = encode_fallback(&fallback);
+        assert_eq!(decode_fallback(&bytes), Some(fallback));
+        assert_eq!(decode_fallback(&bytes[..bytes.len() - 1]), None);
+        assert_eq!(decode_fallback(&[bytes.as_slice(), &[0]].concat()), None);
+        assert_eq!(decode_fallback(b"VMF0"), None);
     }
 }

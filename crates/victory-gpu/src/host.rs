@@ -1177,6 +1177,8 @@ pub(crate) struct HostList {
     /// Device-local scratch buffer for clamped indirect arguments (`indirect`),
     /// grown to the largest indirect execution recorded on the list.
     indirect_args: Mutex<Option<(ID3D12Resource, u64)>>,
+    /// Device-local mesh output reused by fallback draws in this list.
+    mesh_scratch: Mutex<Option<(ID3D12Resource, u64)>>,
     /// Counts the list in [`ALIVE`] while it lives.
     _alive: Counted,
     /// The texts of the markers `note_op` set, in order (for device-removed
@@ -3593,6 +3595,7 @@ impl Host {
                 pipelines: Mutex::default(),
                 budget: OnceLock::new(),
                 indirect_args: Mutex::default(),
+                mesh_scratch: Mutex::default(),
                 _alive: Counted::new(),
                 #[cfg(feature = "diagnostics")]
                 notes: Mutex::default(),
@@ -6200,6 +6203,20 @@ impl HostList {
         if let Some((old_buf, _)) = old {
             self.keep(&old_buf);
         }
+        Some(buffer)
+    }
+
+    /// A device-local UAV buffer reused by mesh fallback dispatches.
+    pub(crate) fn mesh_scratch(&self, size: u64) -> Option<ID3D12Resource> {
+        let needed = size.max(256).next_multiple_of(64 << 10);
+        let mut slot = self.mesh_scratch.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((buffer, capacity)) = &*slot && *capacity >= needed {
+            return Some(buffer.clone());
+        }
+        let capacity = slot.as_ref().map_or(needed, |(_, old)| old.saturating_mul(2).max(needed));
+        let buffer = host()?.uav_buffer(capacity)?;
+        name(&buffer, || format!("mesh output scratch {capacity:#x}"));
+        if let Some((old, _)) = slot.replace((buffer.clone(), capacity)) { self.keep(&old); }
         Some(buffer)
     }
 

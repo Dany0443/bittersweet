@@ -59,6 +59,8 @@ pub mod shader_cache;
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]
+mod mesh_indirect;
+#[cfg(windows)]
 mod shadow;
 pub mod signature;
 #[cfg(windows)]

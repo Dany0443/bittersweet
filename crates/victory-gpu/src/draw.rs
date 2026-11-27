@@ -821,7 +821,7 @@ impl State {
         let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
             return false;
         };
-        if p.compute || p.mesh != mesh {
+        if p.compute || (p.mesh != mesh && !(p.fallback.is_some() && !mesh)) {
             once!(
                 mesh,
                 "a draw or mesh dispatch with another kind of pipeline"
@@ -965,6 +965,9 @@ impl State {
             list.keep(&p.root);
         }
         for stage in &p.stages {
+            if compute && p.fallback.is_some() && stage.shader.stage != "mesh" {
+                continue;
+            }
             let t = stage.translated();
             STORES.set(t.stores);
             let made = self.tables(list, &t.used, &t.host.root_indexed_views, compute);
@@ -2075,10 +2078,13 @@ impl State {
         self.window = None;
         #[cfg(feature = "diagnostics")]
         self.trace("mesh", x, 0);
-        let ran = mesh_test() != 1
-            && mesh_kept(self.pipeline)
-            && self.prepare_for(list, false, true)
-            && match list.list.cast::<ID3D12GraphicsCommandList6>() {
+        let ran = mesh_test() != 1 && mesh_kept(self.pipeline)
+            && if let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) {
+                if let Some(fallback) = &p.fallback {
+                    self.dispatch_mesh_fallback(list, p, fallback, x)
+                } else {
+                    self.prepare_for(list, false, true)
+                        && match list.list.cast::<ID3D12GraphicsCommandList6>() {
                 Ok(l6) => {
                     #[cfg(feature = "diagnostics")]
                     list.note_op(|| self.op_text(format!("mesh {x}"), false));
@@ -2090,12 +2096,70 @@ impl State {
                     true
                 }
                 Err(_) => false,
-            };
+                        }
+                }
+            } else { false };
         if !ran {
             DROPPED.fetch_add(1, Ordering::Relaxed);
             #[cfg(feature = "diagnostics")]
             dropped(self.pipeline);
         }
+    }
+
+    fn dispatch_mesh_fallback(&mut self, list: &HostList, p: &HostPipeline,
+        fallback: &crate::pipeline::host::MeshFallback, groups: u32) -> bool {
+        if groups == 0 { return true; }
+        if groups > 65_535 {
+            once!(groups, "mesh fallback dispatch exceeds the host's 65,535 group limit and is clamped");
+        }
+        let groups = groups.min(65_535);
+        let [vertices, indices, primitives] = fallback.layout.bytes(groups);
+        let align = |bytes: u64| bytes.next_multiple_of(256);
+        let at_indices = align(vertices);
+        let at_primitives = at_indices.saturating_add(align(indices));
+        let size = at_primitives.saturating_add(primitives.max(16));
+        if size > 32 << 20 {
+            once!(groups, size, "mesh fallback output exceeds its 32 MiB per-dispatch budget");
+            return false;
+        }
+        let Some(buffer) = list.mesh_scratch(size) else { return false };
+        list.keep(&buffer);
+        list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
+        if !self.bind_mesh_fallback_compute(list, p) { return false; }
+        let base = unsafe { buffer.GetGPUVirtualAddress() };
+        unsafe {
+            list.list.SetPipelineState(&fallback.compute);
+            self.host_pipeline = fallback.compute.as_raw() as usize;
+            for (parameter, offset) in fallback.outputs.into_iter().zip([0, at_indices, at_primitives]) {
+                list.list.SetComputeRootUnorderedAccessView(parameter, base + offset);
+            }
+            list.list.Dispatch(groups, 1, 1);
+        }
+        let read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE.0 as u32
+            | D3D12_RESOURCE_STATE_INDEX_BUFFER.0 as u32;
+        list.buffer_state(&buffer, read);
+        if !self.prepare_for(list, false, false) { return false; }
+        self.mesh_scissor(list, true);
+        unsafe {
+            for (parameter, offset) in fallback.inputs.into_iter().zip([0, at_indices, at_primitives]) {
+                list.list.SetGraphicsRootShaderResourceView(parameter, base + offset);
+            }
+            list.list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY(4));
+            if fallback.expanded {
+                list.list.DrawInstanced(3 * fallback.layout.max_primitives * groups, 1, 0, 0);
+            } else {
+                let Ok(index_bytes) = u32::try_from(indices) else { return false };
+                list.list.IASetIndexBuffer(Some(&D3D12_INDEX_BUFFER_VIEW {
+                    BufferLocation: base + at_indices, SizeInBytes: index_bytes, Format: DXGI_FORMAT(42),
+                }));
+                list.list.DrawIndexedInstanced(3 * fallback.layout.max_primitives * groups, 1, 0, 0, 0);
+            }
+        }
+        self.mesh_scissor(list, false);
+        self.set_topology(list, self.topology);
+        list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
+        DRAWN.fetch_add(1, Ordering::Relaxed);
+        true
     }
 
     fn roots_ref(&self, compute: bool) -> &Vec<Root> {
@@ -2104,6 +2168,16 @@ impl State {
         } else {
             &self.graphics
         }
+    }
+
+    /// Mesh root arguments are set through the graphics slots by the title.
+    /// Present that state as compute roots while binding the translated mesh
+    /// stage, then restore the title's independent compute state.
+    fn bind_mesh_fallback_compute(&mut self, list: &HostList, p: &HostPipeline) -> bool {
+        let saved = std::mem::replace(&mut self.compute, self.graphics.clone());
+        let bound = self.bind(list, p, true);
+        self.compute = saved;
+        bound
     }
 
     fn table_entry(&self, list: &HostList, u: &UsedResource, compute: bool) {
@@ -2613,6 +2687,13 @@ impl State {
             },
             None => None,
         };
+        if kind == MESH && let Some(fallback) = &p.fallback {
+            if mesh_test() == 1 || !mesh_kept(self.pipeline) {
+                why("mesh draws are switched off (VICTORY_MESH_TEST=skip)");
+                return false;
+            }
+            return self.indirect_mesh_fallback(list, p, fallback, (stride, max, arguments, count));
+        }
         let Some(signature) = matches!(kind, DRAW | INDEXED | DISPATCH | MESH)
             .then(|| host_signature(kind, stride))
             .flatten()
@@ -2796,6 +2877,81 @@ impl State {
         } else {
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
+        true
+    }
+
+    fn indirect_mesh_fallback(&mut self, list: &HostList, p: &HostPipeline,
+        fallback: &crate::pipeline::host::MeshFallback,
+        (stride, max, arguments, count): (u32, u32, u64, Option<u64>)) -> bool {
+        use crate::mesh_indirect::{COMPUTE_STRIDE, draw_stride};
+        let (Some(signatures), Some(convert)) = (&fallback.signatures, crate::mesh_indirect::convert()) else {
+            tracing::warn!(pipeline = %p.name, "indirect mesh fallback unavailable");
+            return false;
+        };
+        if stride < 12 || stride % 4 != 0 {
+            tracing::warn!(stride, "indirect mesh fallback has an invalid argument stride");
+            return false;
+        }
+        let records = max.max(1);
+        let regions = crate::mesh_indirect::regions(&fallback.layout);
+        let compute_bytes = (u64::from(records) * u64::from(COMPUTE_STRIDE)).next_multiple_of(256);
+        let command_bytes = compute_bytes + u64::from(records) * u64::from(draw_stride(fallback.expanded));
+        if command_bytes > 32 << 20 {
+            tracing::warn!(records, command_bytes, "indirect mesh fallback exceeds its 32 MiB command budget");
+            return false;
+        }
+        let (Ok(compute_offset), Ok(index_bytes)) = (u32::try_from(compute_bytes), u32::try_from(regions.index_bytes)) else { return false };
+        let len = u64::from(stride) * u64::from(records);
+        let Some(args) = crate::shadow::find_any(arguments, len) else { return false };
+        let count_shadow = match count {
+            Some(address) => match crate::shadow::find_any(address, 4) { Some(shadow) => Some((shadow, address)), None => return false },
+            None => None,
+        };
+        args.refresh(list, arguments, len);
+        if let Some((shadow, at)) = &count_shadow { shadow.refresh(list, *at, 4); }
+        let (Some(data), Some(commands)) = (list.mesh_scratch(regions.bytes), list.indirect_scratch(command_bytes)) else { return false };
+        list.keep(&data);
+        list.keep(&commands);
+        let data_gpu = unsafe { data.GetGPUVirtualAddress() };
+        let command_gpu = unsafe { commands.GetGPUVirtualAddress() };
+        list.buffer_state(&args.buffer, crate::host::BUFFER_WRITE);
+        if let Some((shadow, _)) = &count_shadow { list.buffer_state(&shadow.buffer, crate::host::BUFFER_WRITE); }
+        list.buffer_state(&data, crate::host::BUFFER_WRITE);
+        list.buffer_state(&commands, crate::host::BUFFER_WRITE);
+        let constants = crate::mesh_indirect::plan((records, stride, count.is_some()),
+            &fallback.layout, &regions, fallback.expanded, data_gpu, compute_offset);
+        crate::mesh_indirect::record(&list.list, convert, &constants, args.gpu(arguments),
+            count_shadow.as_ref().map(|(shadow, at)| shadow.gpu(*at)), command_gpu);
+        list.buffer_state(&commands, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT.0 as u32);
+        self.host_pipeline = 0;
+        self.host_roots[1] = 0;
+        if !self.bind_mesh_fallback_compute(list, p) { return false; }
+        unsafe {
+            list.list.SetPipelineState(&fallback.compute);
+            self.host_pipeline = fallback.compute.as_raw() as usize;
+            list.list.ExecuteIndirect(&signatures.compute, records, &commands, 0, None, 0);
+        }
+        let read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE.0 as u32
+            | D3D12_RESOURCE_STATE_INDEX_BUFFER.0 as u32;
+        list.buffer_state(&data, read);
+        if !self.prepare_for(list, false, false) { return false; }
+        self.mesh_scissor(list, true);
+        unsafe {
+            list.list.SetGraphicsRootShaderResourceView(fallback.inputs[1], data_gpu + regions.indices);
+            list.list.SetGraphicsRootShaderResourceView(fallback.inputs[2], data_gpu + regions.prims);
+            list.list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY(4));
+            if !fallback.expanded {
+                list.list.IASetIndexBuffer(Some(&D3D12_INDEX_BUFFER_VIEW {
+                    BufferLocation: data_gpu + regions.indices, SizeInBytes: index_bytes, Format: DXGI_FORMAT(42),
+                }));
+            }
+            list.list.ExecuteIndirect(&signatures.draw, records, &commands, u64::from(compute_offset), None, 0);
+        }
+        self.mesh_scissor(list, false);
+        self.set_topology(list, self.topology);
+        list.buffer_state(&data, crate::host::BUFFER_WRITE);
+        list.buffer_state(&commands, crate::host::BUFFER_WRITE);
+        DRAWN.fetch_add(1, Ordering::Relaxed);
         true
     }
 }

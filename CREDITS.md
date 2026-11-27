@@ -394,9 +394,9 @@ translator (`crates/victory-shader/src/emit/lower.rs`,
 `crates/victory-shader/src/emit/mod.rs`) follow the RDNA 1 hybrid work
 in `frojo2211-ctrl/VIctory-RDNA1-Hybrid`, snapshot
 `62cd92a73049ea4188b9f501121fc2f116cdda79`. The full compute-shader
-fallback for mesh shaders on RDNA 1 (gfx10.1) hardware is not yet
-implemented; the infrastructure enables future work without regressing
-RDNA 2+ or NVIDIA paths.
+fallback lowering is completed by the later mesh-as-compute API and runtime
+work below. The capability gate preserves native mesh pipelines on hosts
+that report mesh shader support.
 
 ## Experimental Wine mapping server
 
@@ -454,6 +454,19 @@ to share signature and lowering logic between normal and compute-lowered paths,
 and gates the compute path explicitly on the `mesh_as_compute` flag in
 `lower::Parts` so RDNA 2+, RDNA 3, RDNA 4, and NVIDIA paths continue to use
 native mesh shaders unchanged.
+
+## Mesh-as-compute runtime fallback
+
+The no-native-mesh-shader runtime path follows public snapshot `f8297c2` of
+`frojo2211-ctrl/VIctory-RDNA1-Hybrid` (GPL-3.0-or-later). This adaptation
+caches compute and passthrough vertex translations, builds compute and
+graphics pipeline states with mesh-output UAV/SRV root bindings, reuses
+per-list device-local output memory, and handles immediate and indirect mesh
+dispatches. The indirect command conversion shader and command-signature
+layout are adapted from that snapshot. Native mesh pipeline creation remains
+selected when the host reports mesh shader support. Direct dispatches whose
+output would exceed 32 MiB are refused to bound allocation size; indirect
+output is capped by the conversion buffer budget.
 
 ### Movie-plane upload ownership
 

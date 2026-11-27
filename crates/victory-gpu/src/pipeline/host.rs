@@ -8,7 +8,7 @@
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 
-use victory_shader::emit::{ROOT_CBV_SPACE, SAMPLER_SPACE, USER_DATA_SPACE};
+use victory_shader::emit::{MESH_OUT_SPACE, ROOT_CBV_SPACE, SAMPLER_SPACE, USER_DATA_SPACE};
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
@@ -361,6 +361,8 @@ pub(crate) struct HostPipeline {
     pub(crate) compute: bool,
     /// A mesh pipeline (graphics without vertex input).
     pub(crate) mesh: bool,
+    /// Compute translation and output bindings for hosts without mesh shaders.
+    pub(crate) fallback: Option<MeshFallback>,
     pub(crate) pso: ID3D12PipelineState,
     pub(crate) root: ID3D12RootSignature,
     /// Vertex, then pixel stage, or the compute stage.
@@ -378,6 +380,15 @@ pub(crate) struct HostPipeline {
     /// listing (empty for compute).
     #[cfg_attr(not(feature = "diagnostics"), allow(dead_code))]
     pub(crate) state: String,
+}
+
+pub(crate) struct MeshFallback {
+    pub(crate) compute: ID3D12PipelineState,
+    pub(crate) layout: victory_shader::emit::MeshLayout,
+    pub(crate) outputs: [u32; 3],
+    pub(crate) inputs: [u32; 3],
+    pub(crate) expanded: bool,
+    pub(crate) signatures: Option<crate::mesh_indirect::Signatures>,
 }
 
 /// Logs a pipeline that gets no host pipeline, once per reason.
@@ -414,10 +425,27 @@ impl HostPipeline {
             );
         }
         let mesh = find("mesh");
+        let host = host()?;
+        let mesh_fallback = match mesh {
+            Some(ms) if !host.mesh_shaders() => {
+                let fallback = ms.mesh_fallback()?;
+                let translated = ms.translated()?;
+                if fallback.compute.user_data != translated.host.user_data
+                    || fallback.compute.root_cbvs != translated.host.root_cbvs
+                    || fallback.compute.root_srvs != translated.host.root_srvs
+                    || fallback.compute.static_samplers != translated.host.static_samplers
+                {
+                    return refuse("mesh program bindings change in compute fallback", shaders);
+                }
+                Some(fallback)
+            }
+            _ => None,
+        };
         let stages = if let Some(cs) = compute {
             vec![(cs, D3D12_SHADER_VISIBILITY_ALL)]
         } else {
             let first = match (mesh, find("vertex")) {
+                (Some(ms), _) if mesh_fallback.is_some() => (ms, D3D12_SHADER_VISIBILITY_ALL),
                 (Some(ms), _) => (ms, D3D12_SHADER_VISIBILITY_MESH),
                 (None, Some(vs)) => (vs, D3D12_SHADER_VISIBILITY_VERTEX),
                 (None, None) => return refuse("no vertex or mesh shader", shaders),
@@ -426,7 +454,7 @@ impl HostPipeline {
             stages.extend(find("pixel").map(|ps| (ps, D3D12_SHADER_VISIBILITY_PIXEL)));
             stages
         };
-        if mesh.is_some() && !host()?.mesh_shaders() {
+        if mesh.is_some() && mesh_fallback.is_none() && !host.mesh_shaders() {
             return refuse(
                 "the host GPU has no mesh shaders (or no shader model 6.6)",
                 shaders,
@@ -435,8 +463,6 @@ impl HostPipeline {
         for (s, _) in &stages {
             s.translated()?;
         }
-        let host = host()?;
-
         // The root signature the translated shaders' bindings define.
         let mut params: Vec<D3D12_ROOT_PARAMETER1> = Vec::new();
         // The ranges table parameters point at, alive until the root
@@ -444,6 +470,7 @@ impl HostPipeline {
         let mut ranges: Vec<Box<D3D12_DESCRIPTOR_RANGE1>> = Vec::new();
         let mut samplers = Vec::new();
         let mut bound = Vec::new();
+        let mut mesh_out = None;
         for &(shader, visibility) in &stages {
             let t = &shader.translated()?.host;
             let mut stage = Stage {
@@ -564,6 +591,33 @@ impl HostPipeline {
             }
             bound.push(stage);
         }
+        if mesh_fallback.is_some() {
+            let mut outputs = [0u32; 3];
+            let mut inputs = [0u32; 3];
+            for (register, param) in outputs.iter_mut().enumerate() {
+                *param = params.len() as u32;
+                params.push(D3D12_ROOT_PARAMETER1 {
+                    ParameterType: D3D12_ROOT_PARAMETER_TYPE_UAV,
+                    Anonymous: D3D12_ROOT_PARAMETER1_0 { Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                        ShaderRegister: register as u32, RegisterSpace: MESH_OUT_SPACE,
+                        Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                    } },
+                    ShaderVisibility: D3D12_SHADER_VISIBILITY_ALL,
+                });
+            }
+            for (register, param) in inputs.iter_mut().enumerate() {
+                *param = params.len() as u32;
+                params.push(D3D12_ROOT_PARAMETER1 {
+                    ParameterType: D3D12_ROOT_PARAMETER_TYPE_SRV,
+                    Anonymous: D3D12_ROOT_PARAMETER1_0 { Descriptor: D3D12_ROOT_DESCRIPTOR1 {
+                        ShaderRegister: register as u32, RegisterSpace: MESH_OUT_SPACE,
+                        Flags: D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                    } },
+                    ShaderVisibility: D3D12_SHADER_VISIBILITY_VERTEX,
+                });
+            }
+            mesh_out = Some((outputs, inputs));
+        }
         let (root, root_blob) =
             match root_signature(&host.device, &params, &samplers, compute.is_some()) {
                 Ok(root) => root,
@@ -609,6 +663,7 @@ impl HostPipeline {
             return Some(HostPipeline {
                 compute: true,
                 mesh: false,
+                fallback: None,
                 pso,
                 root,
                 stages: bound,
@@ -638,6 +693,62 @@ impl HostPipeline {
             false
         };
         let state = g.describe();
+        if let Some(fallback) = mesh_fallback {
+            let (outputs, inputs) = mesh_out?;
+            let compute_code = D3D12_SHADER_BYTECODE { pShaderBytecode: fallback.compute.dxil.as_ptr().cast(), BytecodeLength: fallback.compute.dxil.len() };
+            let compute_desc = D3D12_COMPUTE_PIPELINE_STATE_DESC {
+                pRootSignature: unsafe { std::mem::transmute_copy(&root) }, CS: compute_code, ..Default::default()
+            };
+            let compute_name = super::library::name("mesh-fallback-compute", &root_blob, &[&code_bytes(&compute_code)], "");
+            let compute_pso = match super::library::pipeline(
+                &compute_name,
+                |library, name| unsafe { library.LoadComputePipeline(name, &compute_desc) },
+                || unsafe { host.device.CreateComputePipelineState(&compute_desc) },
+            ) {
+                Ok(pso) => pso,
+                Err(error) => {
+                    tracing::warn!(error = %error, ?shaders, "host mesh fallback compute pipeline refused");
+                    host.log_messages();
+                    return None;
+                }
+            };
+            let vs_code = D3D12_SHADER_BYTECODE { pShaderBytecode: fallback.vertex.dxil.as_ptr().cast(), BytecodeLength: fallback.vertex.dxil.len() };
+            let ps_code = code(1);
+            let name = super::library::name("mesh-fallback-draw", &root_blob, &[&code_bytes(&vs_code), &code_bytes(&ps_code)], &state);
+            let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+                pRootSignature: unsafe { std::mem::transmute_copy(&root) }, VS: vs_code, PS: ps_code,
+                BlendState: host_blend(&g.blend, &g.targets), SampleMask: g.sample_mask,
+                RasterizerState: g.rasterizer, DepthStencilState: g.depth,
+                InputLayout: D3D12_INPUT_LAYOUT_DESC::default(),
+                IBStripCutValue: D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED,
+                PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+                NumRenderTargets: g.targets.NumRenderTargets, RTVFormats: g.targets.RTFormats,
+                DSVFormat: g.depth_format, SampleDesc: g.samples, ..Default::default()
+            };
+            let made = if depth_bounds {
+                graphics_depth_bounds_pipeline(&host.device, &root, &desc, g.depth1(), &name)
+            } else {
+                super::library::pipeline(
+                    &name,
+                    |library, name| unsafe { library.LoadGraphicsPipeline(name, &desc) },
+                    || unsafe { host.device.CreateGraphicsPipelineState(&desc) },
+                )
+            };
+            let pso = match made {
+                Ok(pso) => pso,
+                Err(error) => {
+                    tracing::warn!(error = %error, ?shaders, "host mesh fallback draw pipeline refused");
+                    host.log_messages();
+                    return None;
+                }
+            };
+            let signatures = crate::mesh_indirect::signatures(&host.device, &root, outputs, inputs[0], fallback.expanded).ok();
+            return Some(HostPipeline {
+                compute: false, mesh: true,
+                fallback: Some(MeshFallback { compute: compute_pso, layout: fallback.layout.clone(), outputs, inputs, expanded: fallback.expanded, signatures }),
+                pso, root, stages: bound, name: format!("{shaders:?}"), slots: 0, inputs: Vec::new(), rects: false, state,
+            });
+        }
         if mesh.is_some() {
             // "triangles": the stream names its topology since it did not
             // load from the library without one (see `mesh_pipeline`); a
@@ -670,6 +781,7 @@ impl HostPipeline {
             return Some(HostPipeline {
                 compute: false,
                 mesh: true,
+                fallback: None,
                 pso,
                 root,
                 stages: bound,
@@ -790,6 +902,7 @@ impl HostPipeline {
         Some(HostPipeline {
             compute: false,
             mesh: false,
+            fallback: None,
             pso,
             root,
             stages: bound,
