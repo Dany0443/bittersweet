@@ -39,6 +39,15 @@ ports do not establish a gameplay performance gain. Linux process mappings
 confirmed substantial resident and swapped memory during loading; CPU
 copying, descriptor sweeps and missing pipelines remain active work.
 
+An RX 7600 trial with `VICTORY_CARD_WINDOWS_MB=768` allocated 768 MiB
+of extra device-local buffer copies. Reported VRAM use peaked at 6119 MiB,
+compared with 4708 MiB in the prior run. Shared system memory still reached
+3974 MiB. These buffers keep CPU staging copies, and several world samples
+sent more than 250 MB to the GPU per frame. The trial was stopped manually
+after 124 seconds. World samples with at least 500 draws ranged from 1.2
+to 2.8 fps. The two runs had different memory conditions and draw counts.
+The setting stays experimental.
+
 ## What works today
 
 | Area | State |
