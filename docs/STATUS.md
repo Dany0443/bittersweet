@@ -75,6 +75,15 @@ of mission playability. No device-removal fault occurred before the manual
 stop, which does not establish stability. The original Proton installation
 is unchanged; this server remains an external diagnostic build.
 
+A bounded GPU material probe recorded 119 field observations in a later
+158-second test. All sampled records used the regular deferred character
+shader, and their source buffers still matched when reported. Fields zero
+and four had resident views in all 17 records; several later fields were
+null. This does not prove that missing color textures cause the black
+characters, or that resident resources contain correct texels. Sampling now
+reserves capacity for both character shader variants. The probe does not
+change upload scheduling, and the character rendering fault remains open.
+
 A prebuilt run reached world rendering with no pipelines pending and still
 ran around 0.7 to 1 fps. It stopped after 164 seconds with a RADV GPUVM
 read fault and device removal. A breadcrumb-enabled diagnostic run

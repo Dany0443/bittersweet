@@ -1,5 +1,10 @@
 # Architecture
 
+In diagnostics builds, selected character draws can copy bounded material
+records from their bound GPU buffer. Completion callbacks run after the
+submission fence and cancel on list reset. The next texture-queue pass
+reports descriptor residency without changing upload scheduling.
+
 ```
  user's files (outside repo)             VIctory
  ───────────────────────────             ─────────────────────────────────────────

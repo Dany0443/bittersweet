@@ -56,6 +56,15 @@ fn indices(words: &[u32], fields: &[u32], count: u32) -> Vec<(u32, u32)> {
         })
         .collect()
 }
+fn take_sample(entries: &mut Vec<(usize, u32, String)>, key: (usize, u32, String)) -> bool {
+    if entries.iter().filter(|entry| entry.2 == key.2).count() >= LIMIT / 2
+        || entries.contains(&key)
+    {
+        return false;
+    }
+    entries.push(key);
+    true
+}
 pub(crate) fn record(list: &HostList, heap: &Heap, table: u64, record: u32, shader: &str) {
     if !enabled() {
         return;
@@ -72,10 +81,9 @@ pub(crate) fn record(list: &HostList, heap: &Heap, table: u64, record: u32, shad
             *budget = (frame, Vec::new());
         }
         let key = (std::ptr::from_ref(heap) as usize, record, shader.to_owned());
-        if budget.1.len() >= LIMIT || budget.1.contains(&key) {
+        if !take_sample(&mut budget.1, key) {
             return;
         }
-        budget.1.push(key);
     }
     let Some(handle) = table.checked_add(688 * 4) else {
         return;
@@ -198,6 +206,23 @@ pub(crate) fn report(heap: &Heap, host: &HostHeap, frame: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn each_character_shader_gets_samples_when_draw_order_is_fixed() {
+        let mut entries = Vec::new();
+        for shader in ["a402e650d0acbc92", "b15ba4896d650511"] {
+            for record in 0..16 {
+                take_sample(&mut entries, (1, record, shader.to_owned()));
+            }
+        }
+        assert_eq!(entries.len(), LIMIT);
+        for shader in ["a402e650d0acbc92", "b15ba4896d650511"] {
+            assert_eq!(
+                entries.iter().filter(|entry| entry.2 == shader).count(),
+                LIMIT / 2
+            );
+        }
+    }
+
     #[test]
     fn character_records_are_bounded_and_indices_follow_wrapping_shift() {
         let regular = fields("a402e650d0acbc92").unwrap();
