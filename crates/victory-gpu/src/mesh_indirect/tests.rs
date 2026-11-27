@@ -1,7 +1,7 @@
 //! The argument pass on a device of its own (hardware or WARP): synthetic
 //! records in, the commands it writes read back.
 
-use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_12_0;
+use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::core::Interface;
 
@@ -9,8 +9,16 @@ use super::*;
 
 fn device() -> Option<ID3D12Device> {
     let mut device: Option<ID3D12Device> = None;
-    // SAFETY: a plain device creation with a valid out pointer.
-    unsafe { D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device) }.ok()?;
+    // SAFETY: a plain device creation with a valid out pointer. The
+    // converter only uses compute and root descriptors.
+    let result = unsafe { D3D12CreateDevice(None, D3D_FEATURE_LEVEL_11_0, &mut device) };
+    if let Err(error) = result {
+        assert!(
+            std::env::var_os("VICTORY_REQUIRE_MESH_TEST_DEVICE").is_none(),
+            "creating the mesh converter test device: {error}"
+        );
+        eprintln!("no D3D12 device; skipped: {error}");
+    }
     device
 }
 
@@ -193,7 +201,6 @@ fn layout(primitive_dwords: u32) -> victory_shader::emit::MeshLayout {
 /// the count says the first two only, or all of them without a count.
 fn check(expanded: bool, count: Option<u32>) {
     let Some(device) = device() else {
-        eprintln!("no D3D12 device; skipped");
         return;
     };
     let layout = layout(if expanded { 4 } else { 0 });
