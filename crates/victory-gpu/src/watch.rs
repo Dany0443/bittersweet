@@ -107,14 +107,26 @@ struct Journal {
     /// Room for the kernel's answer.
     found: Vec<usize>,
     /// Page ranges asked ahead for a submission's refreshes ([`ask_ahead`])
-    /// and the asking that did: `writes` answers for a range inside one
-    /// from the journal, without another kernel call.
+    /// so `writes` can answer from the journal without another kernel call.
     ahead: AskedRanges,
-    ahead_asked: u64,
     /// The ahead asking stands for a whole submission ([`ask_once`]): no
     /// other ahead asking is made, and `ahead` stays, until
     /// [`ask_once_end`].
     kept: bool,
+}
+
+impl Journal {
+    fn cached(&self, first: usize, last: usize) -> Option<(u64, Vec<(usize, u64)>)> {
+        self.ahead.covers(first, last).then(|| {
+            (
+                self.asked,
+                self.written
+                    .range(first..last)
+                    .map(|(&p, &w)| (p, w))
+                    .collect(),
+            )
+        })
+    }
 }
 
 static JOURNAL: Mutex<Journal> = Mutex::new(Journal {
@@ -122,7 +134,6 @@ static JOURNAL: Mutex<Journal> = Mutex::new(Journal {
     written: BTreeMap::new(),
     found: Vec::new(),
     ahead: AskedRanges::new(),
-    ahead_asked: 0,
     kept: false,
 });
 
@@ -158,7 +169,6 @@ pub(crate) fn ask_ahead(ranges: &[(usize, usize)]) {
         return;
     }
     j.asked += 1;
-    j.ahead_asked = j.asked;
     j.ahead.clear();
     let mut i = 0;
     while i < pieces.len() {
@@ -245,11 +255,7 @@ pub(crate) fn ask_once(ranges: &[(usize, usize)]) {
     ask_ahead(ranges);
     let mut j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
     let j = &mut *j;
-    if j.ahead.is_empty() {
-        // `ask_ahead` asked nothing (fewer than two ranges).
-        j.asked += 1;
-        j.ahead_asked = j.asked;
-    }
+    j.asked += 1;
     // `ask_ahead` leaves a range that lies alone to `writes`, which asks
     // once per flush: with one asking for the submission that was every
     // such range asked again at each of its 70 flushes (run 76: 2,300
@@ -342,7 +348,7 @@ fn ask_kernel(j: &mut Journal, first: usize, last: usize) -> bool {
         add(C::WatchUs, started.elapsed().as_micros() as u64);
         slow(started.elapsed().as_micros() as u64);
     }
-    let now = j.ahead_asked;
+    let now = j.asked;
     for k in 0..count {
         let page = j.found[k] / PAGE;
         j.written.insert(page, now);
@@ -352,14 +358,13 @@ fn ask_kernel(j: &mut Journal, first: usize, last: usize) -> bool {
 
 /// What [`writes`] would say of `[start, end)` from the journal alone, if
 /// the range lies in one asked ahead ([`ask_ahead`], [`ask_once`]): the
-/// pages written since tracking began and the asking that last found each
-/// written, with the number of the asking that stands (as [`writes`] gives
-/// it). `None` if the kernel would have to be asked.
+/// pages written since tracking began, their last write generations, and
+/// the generation of the journal snapshot. `None` if the kernel would
+/// have to be asked.
 pub(crate) fn asked(start: usize, end: usize) -> Option<(u64, Vec<(usize, u64)>)> {
     let (first, last) = (start / PAGE, end.div_ceil(PAGE));
     let j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
-    j.ahead.covers(first, last)
-        .then(|| (j.ahead_asked, j.written.range(first..last).map(|(&p, &w)| (p, w)).collect()))
+    j.cached(first, last)
 }
 
 /// The pages of `[start, end)` (whole pages) as last written, for pages
@@ -374,14 +379,8 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     let mut j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
     let j = &mut *j;
     // Asked ahead with the submission's other ranges: the journal has it.
-    if j.ahead.covers(first, last) {
-        return Some((
-            j.ahead_asked,
-            j.written
-                .range(first..last)
-                .map(|(&p, &w)| (p, w))
-                .collect(),
-        ));
+    if let Some(cached) = j.cached(first, last) {
+        return Some(cached);
     }
     let mut count = (last - first) * PAGE / KERNEL_PAGE;
     j.found.resize(count.max(j.found.len()), 0);
@@ -941,6 +940,32 @@ mod tests {
         MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
     };
     const MEM_WRITE_WATCH: u32 = 0x20_0000;
+
+    #[test]
+    fn cached_queries_include_writes_after_the_ahead_ask() {
+        let mut journal = Journal {
+            asked: 6,
+            written: BTreeMap::from([(2, 5), (3, 6)]),
+            found: Vec::new(),
+            ahead: AskedRanges::new(),
+            kept: true,
+        };
+        journal.ahead.insert(2, 4);
+        let (copied_at, written) = journal.cached(2, 4).unwrap();
+        assert_eq!(written, [(2, 5), (3, 6)]);
+        assert!(written.iter().all(|&(_, wrote_at)| wrote_at <= copied_at));
+        journal.asked += 1;
+        journal.written.insert(3, journal.asked);
+        let (_, written) = journal.cached(2, 4).unwrap();
+        assert_eq!(
+            written
+                .into_iter()
+                .filter(|&(_, wrote_at)| wrote_at > copied_at)
+                .collect::<Vec<_>>(),
+            [(3, 7)]
+        );
+        assert!(journal.cached(2, 5).is_none());
+    }
 
     #[test]
     fn indexed_ranges_preserve_individual_query_coverage() {
