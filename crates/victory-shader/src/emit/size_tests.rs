@@ -150,7 +150,13 @@ fn descriptor_count_requires_a_structured_buffer() {
 #[cfg(windows)]
 fn readback(shader: &HostShader, views: &[super::host::View<'_>]) -> [u32; 2] {
     use super::host::{Dispatch, Host, Root};
-    let host = Host::new(false).expect("SM 6.6 hardware device");
+    let host = match Host::new(false) {
+        Ok(host) => host,
+        Err(error) if error == "the default device is the software adapter" => {
+            Host::new(true).expect("SM 6.6 WARP device")
+        }
+        Err(error) => panic!("SM 6.6 hardware device: {error}"),
+    };
     let (root, pso) = host.compute_pipeline(shader).expect("dimension pipeline");
     let output = host
         .dispatch(

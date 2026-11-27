@@ -2107,10 +2107,16 @@ fn glc_heap_uav_loads_stores_and_atomics_execute_on_gpu() {
     };
 
     let mut ran = 0;
+    let mut expected_runs = 2;
     for (label, warp) in [("hardware", false), ("warp", true)] {
-        let Ok(host) = Host::new(warp) else {
-            eprintln!("no SM 6.6 {label} device; skipped");
-            continue;
+        let host = match Host::new(warp) {
+            Ok(host) => host,
+            Err(error) if !warp && error == "the default device is the software adapter" => {
+                eprintln!("no physical adapter; WARP execution remains required");
+                expected_runs -= 1;
+                continue;
+            }
+            Err(error) => panic!("SM 6.6 {label} device: {error}"),
         };
         let (root, pso) = host
             .compute_pipeline(&shader)
@@ -2165,8 +2171,8 @@ fn glc_heap_uav_loads_stores_and_atomics_execute_on_gpu() {
         assert_eq!(&out[2][0..2], &[10, 10], "{label}: image_atomic_add glc");
         ran += 1;
     }
-    assert!(
-        ran == 2,
-        "expected both hardware GPU and WARP to run, got {ran}"
+    assert_eq!(
+        ran, expected_runs,
+        "every available adapter must execute the shader"
     );
 }
