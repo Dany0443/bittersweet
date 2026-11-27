@@ -4,6 +4,68 @@ This page records the current, locally verified state of the Linux/Proton
 effort. External project status is not tracked in this repository; agents
 should research current upstream sources when a task depends on them.
 
+## Latest validation: 2026-11-27
+
+The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
+PR #139. The corrected lowering passes GPU readback checks for signed and
+unsigned min/max, zero, equal operands and selected values under Proton.
+
+Shared texture-address tables from DexNom PR #118 retain byte-identical
+addressing and pass concurrent sharing and texture round-trip tests. In a
+synthetic 10,000-layout construction/clone benchmark, requested allocations
+fell from 15.72 MB to 4.96 MB and construction time from 10.27 to 10.71 ms
+to 2.25 to 2.49 ms across three runs per version. These are allocation and
+construction measurements, not gameplay frame rates.
+
+Wine's compiler rejected the original mesh converter's raw UAV loads.
+The RX 7600 trial used structured dword accesses and an explicit root
+signature to test indexed and expanded output, count limits and 64-bit
+address carry. The merged converter reads inputs through SRVs and uses
+a structured UAV for its output.
+
+A controlled buffer-window reuse trial with the restricted draw lookup
+reached world rendering at roughly 2 to 3 fps. The monitor stopped it after
+99 seconds at 944 MiB available RAM and no free swap. No GPU fault was
+observed before that stop. It establishes neither a performance gain nor
+stability; reuse stays off by default. Stable 20 to 30 fps with complete
+textures and objects remains unachieved.
+
+After rebuilding these ports and warming the pipeline cache, a second trial
+with window reuse disabled reached world rendering at 1.7 to 3.9 fps before
+the monitor stopped it after 63 seconds, at 979 MiB available RAM and no
+free swap. Starting memory and swap conditions differed, so run length and
+frame rates are not a controlled comparison with the reuse trial. The new
+ports do not establish a gameplay performance gain. Linux process mappings
+confirmed substantial resident and swapped memory during loading; CPU
+copying, descriptor sweeps and missing pipelines remain active work.
+
+An RX 7600 trial with `VICTORY_CARD_WINDOWS_MB=768` allocated 768 MiB
+of extra device-local buffer copies. Reported VRAM use peaked at 6119 MiB,
+compared with 4708 MiB in the prior run. Shared system memory still reached
+3974 MiB. These buffers keep CPU staging copies, and several world samples
+sent more than 250 MB to the GPU per frame. The trial was stopped manually
+after 124 seconds. World samples with at least 500 draws ranged from 1.2
+to 2.8 fps. The two runs had different memory conditions and draw counts.
+The setting stays experimental.
+
+The descriptor sweep now caches ranges per heap. In a synthetic sweep
+with 85,098 descriptors, 14,464 buffers and 15,463 changes between full
+rebuilds, bookkeeping took 0.92 to 1.08 ms per pass, down from 1.84 to
+1.94 ms across three trials. Rewriting every slot was slower with the cache.
+The warmed RX 7600 build reached 1.7 to 2.7 fps in two world samples with
+at least 500 draws. The monitor stopped it after 75 seconds, at 902 MiB
+available RAM and 383 MiB free swap. The run still dropped draws for
+missing pipelines and did not establish a gameplay speedup.
+
+The experimental native compute path translated at least 256 creation
+requests under Proton. At least 1,024 requests still lacked a usable
+translation. The enabled trial presented one draw per frame and a black
+window at the observed startup checkpoint. It was stopped manually after
+64 seconds. The same executable with the switch off reached the world.
+This path remains opt-in. The test validates that real descriptions reach
+the translator, while the rendered output and execution of the translated
+programs still need investigation.
+
 ## What works today
 
 | Area | State |
@@ -25,7 +87,7 @@ Sampled world frames took 14 to 27 seconds. Peak use was 7.4 GiB RAM,
 231 seconds under system-wide memory pressure. The kernel logged no new
 GPU reset. Sustained play remains unverified.
 
-Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
+Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600,
 Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
 account/player prompt rendered after the presentation fixes. Synthetic GPU
 tests under Proton create both compositor and both depth-helper pipelines.

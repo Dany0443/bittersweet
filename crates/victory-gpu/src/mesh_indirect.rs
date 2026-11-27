@@ -185,10 +185,9 @@ fn compile() -> windows::core::Result<ID3DBlob> {
                     errors.GetBufferSize(),
                 )
             };
-            tracing::warn!(
-                "mesh fallback argument pass: {}",
-                String::from_utf8_lossy(text)
-            );
+            let message = String::from_utf8_lossy(text);
+            tracing::warn!("mesh fallback argument pass: {message}");
+            return Err(windows::core::Error::new(e.code(), message.as_ref()));
         }
         return Err(e);
     }

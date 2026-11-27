@@ -644,6 +644,88 @@ pub(crate) extern "system" fn create_compute_x(
     create_compute(this, desc, iid, out)
 }
 
+#[cfg(windows)]
+fn native_compute(desc: *const u8) -> Result<Vec<u8>, &'static str> {
+    const BLOCK_LIMIT: u64 = 1 << 20;
+    let mut header = [0u8; 9 * 8];
+    if desc.is_null() || !crate::host::read_into(desc, &mut header) {
+        return Err("unreadable description");
+    }
+    let word =
+        |index: usize| u64::from_le_bytes(header[index * 8..index * 8 + 8].try_into().unwrap());
+    let block = |index: usize| {
+        let (address, size) = (word(index), word(index + 1));
+        if address == 0 || !(4..=BLOCK_LIMIT).contains(&size) || address.checked_add(size).is_none()
+        {
+            return Err("invalid native compute block");
+        }
+        let mut bytes = vec![0; size as usize];
+        crate::host::read_into(address as *const u8, &mut bytes)
+            .then_some(bytes)
+            .ok_or("unreadable native compute block")
+    };
+    let root = if word(0) == 0 {
+        None
+    } else {
+        Some(crate::root::blob_of(word(0) as This).ok_or("unreadable compute root signature")?)
+    };
+    let (registers, code, resources) = (block(1)?, block(5)?, block(7)?);
+    victory_shader::native::console_compute_container(
+        &registers,
+        &resources,
+        &code,
+        root.as_deref(),
+    )
+    .map_err(|error| match error {
+        victory_shader::ShaderError::Malformed(why) => why,
+        _ => "invalid native compute program",
+    })
+}
+
+#[cfg(windows)]
+pub(crate) extern "system" fn create_native_compute(
+    _: This,
+    desc: *const u8,
+    iid: *const Iid,
+    out: *mut This,
+) -> HRESULT {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    if !out.is_null() {
+        // SAFETY: the title passes space for the returned interface.
+        unsafe { out.write(std::ptr::null()) };
+    }
+    static COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+    let count = |kind: usize| COUNTS[kind].fetch_add(1, Ordering::Relaxed) + 1;
+    let container = match native_compute(desc) {
+        Ok(container) => container,
+        Err(why) => {
+            let refused = count(0);
+            if refused.is_power_of_two() {
+                tracing::warn!(refused, why, "native compute descriptions refused");
+            }
+            return crate::object::E_NOTIMPL;
+        }
+    };
+    let shader = shader("compute", &container);
+    let shaders = vec![shader];
+    if skipped_shader(&shaders).is_some()
+        || library::crashed(&make::key(&shaders, None))
+        || shaders[0].translated().is_none()
+    {
+        let untranslated = count(1);
+        if untranslated.is_power_of_two() {
+            tracing::warn!(untranslated, "native compute pipelines unavailable");
+        }
+        return crate::object::E_NOTIMPL;
+    }
+    let accepted = count(2);
+    if accepted.is_power_of_two() {
+        tracing::info!(accepted, "native compute shaders translated");
+    }
+    hand_out(shaders, None, iid, out)
+}
+
 /// A pipeline described as a stream: its size and the subobjects, each a
 /// type then its data, padded to 8 bytes.
 #[repr(C)]
@@ -931,6 +1013,25 @@ mod tests {
         assert_eq!(classify(&[0xDC70_8000, 0x007C_0005]), BufferWrites::RawAddress);
         assert_eq!(classify(&[0xDCC8_8000, 0x007C_0005]), BufferWrites::RawAddress);
         assert_eq!(buffer_writes(&[0xff]), BufferWrites::RawAddress);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_compute_slot_clears_output_and_rejects_invalid_block_length() {
+        let mut description = [0u64; 9];
+        description[1] = 1;
+        description[2] = (1 << 20) + 1;
+        let mut out = std::ptr::dangling();
+        assert_eq!(
+            create_native_compute(
+                std::ptr::null(),
+                description.as_ptr().cast(),
+                &PIPELINE_IIDS[0],
+                &mut out,
+            ),
+            crate::object::E_NOTIMPL
+        );
+        assert!(out.is_null());
     }
 
     fn shaders(p: This) -> Vec<(&'static str, Vec<u8>)> {

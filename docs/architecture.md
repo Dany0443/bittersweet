@@ -36,6 +36,16 @@ in a separate index. Retirement and in-place invalidation remove stale
 aliases under the same cache lock; descriptors retain the buffer identity
 selected for their range.
 
+Each host descriptor heap owns the buffer references from its descriptor
+sweep. The sweep caches the combined address range for each buffer and
+recalculates it when an edge view moves inward or disappears. The existing
+periodic revalidation still revisits all buffer descriptors.
+
+The experimental native compute entry point reads a console pipeline
+description and wraps its program in an internal shader container. This
+reuses the existing shader translator and pipeline cache. It rejects
+descriptions it cannot read and shaders it cannot translate.
+
 ## Crates
 
 | Crate | Role |
@@ -92,8 +102,10 @@ through vkd3d-proton. This path has locally rendered the account/player
 prompt; a native Vulkan backend is not implemented. `Cargo.toml` keeps
 portable crates as `default-members`.
 
-Host compositor and depth helpers serialize their root signatures directly.
+Host compositor, depth and indirect-mesh helpers serialize their root signatures directly.
 They do not require Wine's HLSL compiler to embed root-signature attributes.
+The indirect-mesh converter reads its input buffers as SRVs and writes
+structured dwords to a UAV. Wine compiles that combination.
 The card-memory comparison helper also uses structured UAV accesses so
 Wine can compile its existing hash and change-detection algorithm.
 Retail presentation records use a 72-byte stride, including all seven option

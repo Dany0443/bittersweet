@@ -139,6 +139,10 @@ each crate's manifest. They are linked, not copied into this repository.
 
 All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 
+- Shared immutable texture-address tables, [PR #118](https://github.com/DexNom/VIctory/pull/118), head `a0cf6e6c6822f14a77d6e173eff2c4082e266d66`: Cache the standard 2D/3D addressing patterns by tile kind, element size and block size. Cloning layouts retains the same tables. The newer render-XOR layout path is not present here.
+
+- Scalar min/max condition codes, [PR #139](https://github.com/DexNom/VIctory/pull/139), head `eeaa31ff38a9347af719bf8897ac91cfb3871828`: Set SCC when the first operand wins the comparison, including zero and signed operands. Synthetic GPU tests check both the selected value and SCC.
+
 - Uniform static-sampler selection, commit `ddb73326b09e600bd2405ee5c987fa611098aaa1`: Sample both constant bindings and select the texel using the original uniform branch edge. Preserve derivatives and retain unreachable-edge handling.
 
 - Restored wave64 mask recognition, commit `76749ce58da23a43a3500454a8b69c53f05aa477`: Trace both scalar-copy chains back to the same known mask in their original dword order. Reject a duplicated or replaced high dword.
@@ -547,3 +551,14 @@ Bittersweet keeps aliases in a separate index so they do not retain GPU
 buffers or change the existing idle-retirement ownership checks. This port
 covers lookup reuse, canonical accounting and alias invalidation; it does
 not add the PR's immediate reclamation of superseded windows.
+
+Descriptor sweep range caching follows [VIctory-RDNA commit
+`f8eb38d58232370cad1e44afb3896d208071b6ae`](https://github.com/XaviFortes/VIctory-RDNA/commit/f8eb38d58232370cad1e44afb3896d208071b6ae).
+This adaptation tracks bounds by buffer and ties the cache lifetime to
+the descriptor heap.
+
+The native compute description decoder and container writer are adapted
+from [DexNom/VIctory PR #64](https://github.com/DexNom/VIctory/pull/64)
+at `3f48fd433e1ebb058f1c27abba770cd26dd08e07`. Bittersweet bounds reads of
+the description and its blocks and validates the root layout before using
+its existing shader translator.

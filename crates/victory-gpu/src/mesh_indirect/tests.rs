@@ -199,13 +199,12 @@ fn layout(primitive_dwords: u32) -> victory_shader::emit::MeshLayout {
 
 /// Three records of 2, 0 and 5 groups (12-byte records, 16 bytes apart);
 /// the count says the first two only, or all of them without a count.
-fn check(expanded: bool, count: Option<u32>) {
+fn check(expanded: bool, count: Option<u32>, data: u64) {
     let Some(device) = device() else {
         return;
     };
     let layout = layout(if expanded { 4 } else { 0 });
     let regions = regions(&layout);
-    let data = 0x1_0000_0000u64;
     let records = 3;
     let draws = records * COMPUTE_STRIDE;
     let args = [2, 1, 1, 0, 0, 1, 1, 0, 5, 1, 1, 0];
@@ -262,17 +261,23 @@ fn check(expanded: bool, count: Option<u32>) {
 
 #[test]
 fn indexed_records_get_their_own_output() {
-    check(false, None);
+    check(false, None, 0x1_0000_0000);
 }
 
 #[test]
 fn expanded_records_get_their_own_output() {
-    check(true, None);
+    check(true, None, 0x1_0000_0000);
 }
 
 #[test]
 fn records_past_the_count_run_empty() {
-    check(false, Some(2));
+    check(false, Some(2), 0x1_0000_0000);
+}
+
+#[test]
+fn output_addresses_carry_into_the_high_dword() {
+    check(false, None, 0x1_ffff_ffe0);
+    check(true, None, 0x1_ffff_ffe0);
 }
 
 #[test]

@@ -68,6 +68,10 @@
 //! 0x12 16-byte blobs (0x10 is the shader hash).
 //! Unknown versions are rejected so a format change shows up as an error.
 
+#[path = "native_build.rs"]
+mod build;
+pub use build::console_compute_container;
+
 use crate::ShaderError::{self, Malformed};
 use crate::dxbc::{u16_at, u32_at, u64_at};
 

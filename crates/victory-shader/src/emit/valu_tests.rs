@@ -249,6 +249,57 @@ fn scalar_condition_codes_can_be_read_as_integer_operands() {
     }
 }
 
+#[test]
+fn scalar_min_max_set_scc_when_the_first_source_is_chosen() {
+    let cases = [
+        [0, 5, 0, 0],
+        [5, 0, 0, 0],
+        [7, 7, 0, 0],
+        [0, 0, 0, 0],
+        [u32::MAX, 1, 0, 0],
+        [1, u32::MAX, 0, 0],
+        [0x8000_0000, 0, 0, 0],
+    ];
+    for (opcode, signed, minimum) in [
+        (0x06, true, true),
+        (0x07, false, true),
+        (0x08, true, false),
+        (0x09, false, false),
+    ] {
+        for condition in [false, true] {
+            let result = if condition {
+                sop2(0x0a, 3, 129, 128)
+            } else {
+                s_mov_b32(3, 2)
+            };
+            let shader = build_valu_cs(&[sop2(opcode, 2, 0, 1), result, vop1(1, 0, sgpr(3))]);
+            run_cases(&shader, &cases, |backend, _, [a, b, _, _], actual| {
+                let order = if signed {
+                    (a as i32).cmp(&(b as i32))
+                } else {
+                    a.cmp(&b)
+                };
+                let chosen = if minimum {
+                    order.is_lt()
+                } else {
+                    order.is_gt()
+                };
+                let expected = if condition {
+                    u32::from(chosen)
+                } else if chosen {
+                    a
+                } else {
+                    b
+                };
+                assert_eq!(
+                    actual, expected,
+                    "{backend}: opcode={opcode:#x} condition={condition} {a:#x} {b:#x}"
+                );
+            });
+        }
+    }
+}
+
 /// [`build_valu_cs`] with `threads` threads in x (thread index in `v0`
 /// on entry, before `body`) and `lds_bytes` of LDS (a multiple of 512).
 fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
