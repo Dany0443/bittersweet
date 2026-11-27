@@ -116,6 +116,22 @@ impl<'a> Lower<'a> {
             return Err("a ray-tracing structure that returns triangle ids");
         }
         let guard = self.guard(b, i)?;
+        if crate::emit::ray_miss_only() {
+            let pointer = inst.read(Reg::V(regs[0])).ok_or("an unread node pointer")?;
+            let pointer = self.i32_of(pointer)?;
+            let cur = self.cur;
+            let mask = self.s.m.i32(6);
+            let box_kind = self.s.m.i32(4);
+            let pair = self.s.m.bin(cur, Bin::And, pointer, mask);
+            let is_box = self.s.m.cmp(cur, pred::EQ, pair, box_kind);
+            let none = self.s.m.i32(bvh::NONE);
+            for (k, miss) in bvh::MISS.into_iter().enumerate() {
+                let miss = self.s.m.i32(miss.to_bits());
+                let value = self.s.m.select(cur, is_box, none, miss);
+                self.write(inst, Reg::V(dst + k as u8), value, guard);
+            }
+            return Ok(());
+        }
         let mut x = Vec::with_capacity(regs.len());
         for &r in &regs {
             let v = inst.read(Reg::V(r)).ok_or("an unread operand")?;

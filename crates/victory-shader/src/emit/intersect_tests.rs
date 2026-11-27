@@ -564,6 +564,8 @@ fn run(wide: bool, descriptor: Descriptor, pointers: u64, sort: bool) {
             for t in 0..THREADS as usize {
                 let case = batch.get(t).copied().flatten();
                 let want = match batch.get(t) {
+                    Some(Some((_, 4 | 5, _))) if super::ray_miss_only() => [bvh::NONE; 4],
+                    Some(Some(_)) if super::ray_miss_only() => bvh::MISS.map(f32::to_bits),
                     Some(c) => expected(&scene, c, sort),
                     // A thread past the batch: its record is zeros, so it
                     // is masked out.
@@ -599,6 +601,13 @@ fn the_64_bit_node_test_in_a_host_buffer_matches_the_reference_on_the_card() {
 #[test]
 fn the_32_bit_node_test_in_a_host_buffer_matches_the_reference_on_the_card() {
     run(false, Descriptor::Table, u64::from(NODES), true);
+}
+
+#[test]
+fn ray_miss_mode_preserves_box_triangle_and_inactive_lane_results() {
+    super::FORCE_RAY_MISS.set(true);
+    run(false, Descriptor::Table, u64::from(NODES), true);
+    super::FORCE_RAY_MISS.set(false);
 }
 
 /// Where the tests' title memory puts the buffer: past 4 GiB, on 256 bytes.

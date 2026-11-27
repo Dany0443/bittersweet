@@ -160,6 +160,21 @@ pub fn loop_limit() -> u32 {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    static FORCE_RAY_MISS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Keep shader outputs and bindings, but return misses from console ray queries.
+pub fn ray_miss_only() -> bool {
+    #[cfg(test)]
+    if FORCE_RAY_MISS.get() {
+        return true;
+    }
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_RAY_MISS_ONLY").is_some_and(|v| v == "1"))
+}
+
 /// Which of a translated program's group barriers wait for the whole
 /// group (`GroupMemoryBarrierWithGroupSync`); the others keep their memory
 /// fence and lose the wait. A wait that some thread of the group never

@@ -322,6 +322,9 @@ pub(crate) fn builder_off(why: &'static str) {
 /// [`Builder`]).
 #[cfg(windows)]
 pub(crate) fn builder_runs() -> bool {
+    if victory_shader::emit::ray_miss_only() {
+        return false;
+    }
     static ALLOWED: OnceLock<bool> = OnceLock::new();
     if !*ALLOWED.get_or_init(|| std::env::var_os("VICTORY_BVH_BUILDER").is_some_and(|v| v == "1")) {
         return false;

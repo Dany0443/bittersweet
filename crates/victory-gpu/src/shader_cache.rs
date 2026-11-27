@@ -50,6 +50,10 @@ pub fn translation_fingerprint() -> &'static [u8; 32] {
                 "VICTORY_SHADER_LOOP_LIMIT: translated loops stop sooner"
             );
         }
+        let ray_miss = victory_shader::emit::ray_miss_only();
+        if ray_miss {
+            tracing::info!("console ray intersections return misses (VICTORY_RAY_MISS_ONLY=1)");
+        }
         match exe {
             Ok(mut bytes) => {
                 bytes.extend_from_slice(&limit.to_le_bytes());
@@ -88,6 +92,7 @@ pub fn translation_fingerprint() -> &'static [u8; 32] {
                 }
                 // And which clean-up passes ran over the translated code.
                 bytes.extend_from_slice(&victory_shader::emit::shader_opt().to_le_bytes());
+                bytes.push(u8::from(ray_miss));
                 *blake3::hash(&bytes).as_bytes()
             }
             Err(e) => {

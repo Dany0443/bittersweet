@@ -96,6 +96,12 @@ For pipeline diagnostics, `VICTORY_NATIVE_COMPUTE=1` enables the experimental
 native compute creation method. Leave it unset for gameplay. The RX 7600
 test presented a black screen with it enabled.
 
+To test without ray hits, set `VICTORY_RAY_MISS_ONLY=1` before starting
+Proton. The structure builder stays off, and translated ray queries return
+misses without removing the surrounding draws. Lighting, shadows, and
+reflections can look different. Unset the variable to restore normal
+shader translation.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·
