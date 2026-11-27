@@ -1764,7 +1764,7 @@ mod mesh_as_compute_tests {
         };
         let [v, i, p] = layout.bytes(3);
         assert_eq!(v, 3 * 2 * 4 * 4);   // groups * vertices * dwords * 4
-        assert_eq!(i, 3 * 1 * 12);       // groups * primitives * 3 indices * 4
+        assert_eq!(i, 3 * 12);       // groups * primitives * 3 indices * 4
         assert_eq!(p, 0);
     }
 
@@ -1779,9 +1779,9 @@ mod mesh_as_compute_tests {
             primitive_dwords: 4,
         };
         let [v, i, p] = layout.bytes(1);
-        assert_eq!(v, 1 * 4 * 8 * 4);
-        assert_eq!(i, 1 * 2 * 12);
-        assert_eq!(p, 1 * 2 * 4 * 4);
+        assert_eq!(v, 4 * 8 * 4);
+        assert_eq!(i, 2 * 12);
+        assert_eq!(p, 2 * 4 * 4);
     }
 
     /// A `MeshFallback` without per-primitive outputs is not expanded.
