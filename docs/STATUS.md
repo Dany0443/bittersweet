@@ -15,6 +15,20 @@ without a GPU reset or an OOM kill. Sampled peaks were 6,399 MiB VRAM,
 VRAM and was stopped by systemd-oomd. The builds and starting memory
 conditions differed, so the comparison does not isolate a single fix.
 
+The RX 7600 trials of merge `b8e5a19` used the same warmed executable
+and Series S profile. The default submission path produced one substantial
+world sample at 1.2 fps with 2,448 draws. With `VICTORY_LATE_WAIT=1`, three
+world samples ranged from 2.4 to 3.4 fps with 576 to 3,357 draws. The
+memory monitor stopped both runs after 53 and 61 seconds respectively.
+Starting RAM and swap varied, and the samples covered different stages of
+loading. The results do not establish a gameplay speedup.
+
+The overlap run still copied 451 to 628 MB per frame in its two denser
+samples. A queue report attributed 54.4 ms of its 67.1 ms GPU wait per
+frame to title memory changes overlapping unfinished shader writes.
+Reported card load was typically low and the denser samples still dropped
+423 to 1,378 draws for missing pipelines. Neither run logged device loss.
+
 The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
 PR #139. The corrected lowering passes GPU readback checks for signed and
 unsigned min/max, zero, equal operands and selected values under Proton.
