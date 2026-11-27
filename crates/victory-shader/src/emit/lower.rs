@@ -6761,12 +6761,12 @@ impl<'a> Lower<'a> {
                     (RootType::Descriptor, Some(ResourceType::Srv), 11) => {
                         Ok(self.s.root_srv_handle(rp.slot))
                     }
-                    // A root UAV: a raw buffer whether the access reads
-                    // (11) or writes (11 with the UAV bit). Indexed
-                    // accesses reach here as raw ones at index times the
-                    // entry's stride (`buffer`).
-                    (RootType::Descriptor, Some(ResourceType::Uav), 11 | 0x100b) => {
-                        Ok(self.s.root_uav_handle(rp.slot))
+                    // Root UAVs stay raw, including globally coherent accesses.
+                    (RootType::Descriptor, Some(ResourceType::Uav), 11 | 0x100b | 0x500b) => {
+                        Ok(self.s.root_uav_handle_with_coherence(
+                            rp.slot,
+                            props.0 & GLOBALLY_COHERENT_PROP != 0,
+                        ))
                     }
                     (RootType::Descriptor, Some(ResourceType::Srv), 0x100b) => {
                         Err("a write through a root SRV")
@@ -13011,6 +13011,41 @@ mod tests {
         }
         #[cfg(not(windows))]
         let _ = dxil;
+    }
+
+    #[test]
+    fn root_uav_loads_preserve_global_coherence() {
+        for glc in [false, true] {
+            let words = [
+                0xBE82_03C1, // s_mov_b32 s2, -1
+                0xBE83_0380, // s_mov_b32 s3, 0
+                0x7E00_0280, // v_mov_b32 v0, 0
+                0xE030_1000 | if glc { 0x4000 } else { 0 },
+                0x8000_0100, // buffer_load_dword v1, v0, s[0:3], 0 offen
+                0xE030_1004 | if glc { 0 } else { 0x4000 },
+                0x8000_0200, // buffer_load_dword v2, v0, s[0:3], 0 offen offset:4
+                0x4A02_0501, // v_add_nc_u32 v1, v1, v2
+                0xE070_5008,
+                0x8000_0100, // buffer_store_dword v1, v0, s[0:3], 0 offen offset:8 glc
+                0xD834_0000,
+                0x0000_0100, // ds_write_b32 v0, v1
+                S_ENDPGM,
+            ];
+            let used = vec![UsedResource {
+                kind: ResourceType::Uav,
+                root: RootType::Descriptor,
+                table_offset_dwords: 0,
+                lower_bound: 0,
+                stride: 0,
+                dwords: 4,
+                user_data: 0,
+                slot: 0,
+            }];
+            let l = lower_with(&words, vec![root(RootType::Descriptor, 0, 0)], used)
+                .unwrap_or_else(|e| panic!("glc={glc}: {e}"));
+            assert_eq!(l.root_uavs, vec![0]);
+            validate_dxil(&l.dxil);
+        }
     }
 
     #[test]

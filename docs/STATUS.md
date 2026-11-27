@@ -91,6 +91,13 @@ continued for 422 seconds before being stopped manually without that
 fault, but was slower. The failure remains unresolved; this does not
 establish stability. The Proton build reports no D3D12 debug layer.
 
+A synthetic regression reproduced globally coherent root-UAV loads being
+rejected as typed root views. The translator now preserves coherence in
+both handle properties and resource metadata, with mixed load/store DXIL
+validation under Proton. The local structure-builder DLL now creates all
+52 offline pipelines, up from 48. This does not verify builder execution,
+lighting correctness or a title performance gain; the builder remains opt-in.
+
 ## What is missing
 
 1. **Mission-level execution evidence.** Proton reaches the account/player

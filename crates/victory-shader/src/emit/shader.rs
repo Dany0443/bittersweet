@@ -175,6 +175,7 @@ pub(crate) struct Shader {
     pub root_srvs: Vec<(u8, V)>,
     /// Root UAVs (raw buffers) read or written, likewise.
     pub root_uavs: Vec<(u8, V)>,
+    coherent_root_uavs: Vec<(u8, V)>,
     pub flags: u64,
     /// Heap handles made with a non-uniform index.
     pub nonuniform_handles: u32,
@@ -241,6 +242,7 @@ impl Shader {
             root_cbvs: Vec::new(),
             root_srvs: Vec::new(),
             root_uavs: Vec::new(),
+            coherent_root_uavs: Vec::new(),
             flags: 0,
             nonuniform_handles: 0,
             #[cfg(test)]
@@ -366,7 +368,16 @@ impl Shader {
     /// The handle of the root UAV (a raw buffer) of root parameter `slot`:
     /// `u<slot>` in [`ROOT_CBV_SPACE`].
     pub fn root_uav_handle(&mut self, slot: u8) -> V {
-        if let Some(&(_, h)) = self.root_uavs.iter().find(|r| r.0 == slot) {
+        self.root_uav_handle_with_coherence(slot, false)
+    }
+
+    pub fn root_uav_handle_with_coherence(&mut self, slot: u8, coherent: bool) -> V {
+        let handles = if coherent {
+            &self.coherent_root_uavs
+        } else {
+            &self.root_uavs
+        };
+        if let Some(&(_, h)) = handles.iter().find(|r| r.0 == slot) {
             return h;
         }
         let r = self.m.i32(u32::from(slot));
@@ -382,9 +393,15 @@ impl Shader {
             217,
             &[bind, r, f],
         );
-        let h = self.annotate(block, h, 11 | 0x1000, 0);
+        let props = 11 | 0x1000 | if coherent { 0x4000 } else { 0 };
+        let h = self.annotate(block, h, props, 0);
         self.flags |= flags::RAW_BUFFERS;
-        self.root_uavs.push((slot, h));
+        if !self.root_uavs.iter().any(|r| r.0 == slot) {
+            self.root_uavs.push((slot, h));
+        }
+        if coherent {
+            self.coherent_root_uavs.push((slot, h));
+        }
         h
     }
 
@@ -688,6 +705,10 @@ impl Shader {
                     // Id, variable, name, space, lower bound, range size,
                     // shape (11: raw buffer), globally coherent, counter,
                     // rasterizer ordered, no extra properties.
+                    let coherent = self
+                        .m
+                        .bool(self.coherent_root_uavs.iter().any(|r| r.0 == slot));
+                    let coherent = self.m.md_value(coherent);
                     let ops = vec![
                         Some(i32c(&mut self, n as u32)),
                         Some(self.m.md_value(u)),
@@ -696,7 +717,7 @@ impl Shader {
                         Some(i32c(&mut self, u32::from(slot))),
                         Some(i32c(&mut self, 1)),
                         Some(i32c(&mut self, 11)),
-                        Some(no),
+                        Some(coherent),
                         Some(no),
                         Some(no),
                         None,
