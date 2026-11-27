@@ -31,7 +31,7 @@ may perform differently.
 
 | GPU | Architecture | Observed Behavior | Known Issues |
 |---|---|---|---|
-| Radeon RX 5700 | RDNA 1 (gfx10.1) | Renders the character and outdoor 3D world through the compute mesh fallback on RADV and GE-Proton11-12 with VKD3D-Proton `71cae09`. | World frames take many seconds, with missing or dark materials. System-wide memory pressure ended the 16 GB test run. |
+| Radeon RX 5700 | RDNA 1 (gfx10.1) | Advances through the first 3D cutscene using the compute mesh fallback on RADV and GE-Proton11-12 with VKD3D-Proton `71cae09`. The latest 16 GB test reached its planned timeout. | Late cutscene frames often take two to three seconds, with longer stalls and dark or missing materials. Playable frame rates remain unverified. |
 
 ## Build and run on Linux
 

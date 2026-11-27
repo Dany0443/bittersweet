@@ -6,6 +6,15 @@ should research current upstream sources when a task depends on them.
 
 ## Latest validation: 2026-11-27
 
+The merged RX 5700 build reached the first 3D cutscene and presented
+changing frames from 219 through 269 seconds. Several late world samples
+took about two to three seconds per frame, with longer stalls and dark
+or missing materials. The run reached its planned 270-second timeout
+without a GPU reset or an OOM kill. Sampled peaks were 6,399 MiB VRAM,
+7,365 MiB RAM and 2,847 MiB swap. The preceding run peaked at 8,104 MiB
+VRAM and was stopped by systemd-oomd. The builds and starting memory
+conditions differed, so the comparison does not isolate a single fix.
+
 The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
 PR #139. The corrected lowering passes GPU readback checks for signed and
 unsigned min/max, zero, equal operands and selected values under Proton.
