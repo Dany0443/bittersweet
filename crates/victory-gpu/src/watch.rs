@@ -30,6 +30,75 @@ pub(crate) const PAGE: usize = 64 << 10;
 /// The kernel's page, the unit of its answers.
 const KERNEL_PAGE: usize = 4096;
 
+// Keep original-query containment: overlapping ranges do not imply their union was queried.
+struct AskedRanges {
+    small: Vec<(usize, usize)>,
+    indexed: Option<BTreeMap<usize, usize>>,
+}
+
+impl AskedRanges {
+    const SMALL_LIMIT: usize = 32;
+
+    const fn new() -> Self {
+        Self {
+            small: Vec::new(),
+            indexed: None,
+        }
+    }
+
+    fn covers(&self, first: usize, last: usize) -> bool {
+        match &self.indexed {
+            Some(ranges) => Self::covers_indexed(ranges, first, last),
+            None => self.small.iter().any(|&(a, b)| a <= first && last <= b),
+        }
+    }
+
+    fn insert(&mut self, first: usize, last: usize) {
+        if self.indexed.is_none() && self.small.len() < Self::SMALL_LIMIT {
+            self.small.push((first, last));
+            return;
+        }
+        let small = &mut self.small;
+        let ranges = self.indexed.get_or_insert_with(|| {
+            let mut ranges = BTreeMap::new();
+            for (a, b) in small.drain(..) {
+                Self::insert_indexed(&mut ranges, a, b);
+            }
+            ranges
+        });
+        Self::insert_indexed(ranges, first, last);
+    }
+
+    fn covers_indexed(ranges: &BTreeMap<usize, usize>, first: usize, last: usize) -> bool {
+        ranges
+            .range(..=first)
+            .next_back()
+            .is_some_and(|(_, &end)| last <= end)
+    }
+
+    fn insert_indexed(ranges: &mut BTreeMap<usize, usize>, first: usize, last: usize) {
+        if Self::covers_indexed(ranges, first, last) {
+            return;
+        }
+        while let Some((&start, &end)) = ranges.range(first..).next() {
+            if end > last {
+                break;
+            }
+            ranges.remove(&start);
+        }
+        ranges.insert(first, last);
+    }
+
+    fn clear(&mut self) {
+        self.small.clear();
+        self.indexed = None;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.small.is_empty() && self.indexed.as_ref().is_none_or(BTreeMap::is_empty)
+    }
+}
+
 struct Journal {
     /// Numbers the askings; 0 is "never".
     asked: u64,
@@ -40,7 +109,7 @@ struct Journal {
     /// Page ranges asked ahead for a submission's refreshes ([`ask_ahead`])
     /// and the asking that did: `writes` answers for a range inside one
     /// from the journal, without another kernel call.
-    ahead: Vec<(usize, usize)>,
+    ahead: AskedRanges,
     ahead_asked: u64,
     /// The ahead asking stands for a whole submission ([`ask_once`]): no
     /// other ahead asking is made, and `ahead` stays, until
@@ -52,7 +121,7 @@ static JOURNAL: Mutex<Journal> = Mutex::new(Journal {
     asked: 0,
     written: BTreeMap::new(),
     found: Vec::new(),
-    ahead: Vec::new(),
+    ahead: AskedRanges::new(),
     ahead_asked: 0,
     kept: false,
 });
@@ -191,8 +260,8 @@ pub(crate) fn ask_once(ranges: &[(usize, usize)]) {
             continue;
         }
         let (first, last) = (start / PAGE, end.div_ceil(PAGE));
-        if !j.ahead.iter().any(|&(a, b)| a <= first && last <= b) && ask_kernel(j, first, last) {
-            j.ahead.push((first, last));
+        if !j.ahead.covers(first, last) && ask_kernel(j, first, last) {
+            j.ahead.insert(first, last);
         }
     }
     j.kept = !j.ahead.is_empty();
@@ -233,7 +302,7 @@ fn ask_run(j: &mut Journal, pieces: &[(usize, usize)]) {
     let first = pieces[0].0;
     let last = pieces.iter().map(|p| p.1).max().unwrap_or(first);
     if ask_kernel(j, first, last) {
-        j.ahead.push((first, last));
+        j.ahead.insert(first, last);
         return;
     }
     let (a, b) = pieces.split_at(pieces.len() / 2);
@@ -289,9 +358,7 @@ fn ask_kernel(j: &mut Journal, first: usize, last: usize) -> bool {
 pub(crate) fn asked(start: usize, end: usize) -> Option<(u64, Vec<(usize, u64)>)> {
     let (first, last) = (start / PAGE, end.div_ceil(PAGE));
     let j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
-    j.ahead
-        .iter()
-        .any(|&(a, b)| a <= first && last <= b)
+    j.ahead.covers(first, last)
         .then(|| (j.ahead_asked, j.written.range(first..last).map(|(&p, &w)| (p, w)).collect()))
 }
 
@@ -307,7 +374,7 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     let mut j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
     let j = &mut *j;
     // Asked ahead with the submission's other ranges: the journal has it.
-    if j.ahead.iter().any(|&(a, b)| a <= first && last <= b) {
+    if j.ahead.covers(first, last) {
         return Some((
             j.ahead_asked,
             j.written
@@ -870,6 +937,45 @@ mod tests {
         MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
     };
     const MEM_WRITE_WATCH: u32 = 0x20_0000;
+
+    #[test]
+    fn indexed_ranges_preserve_individual_query_coverage() {
+        let queries: Vec<_> = (0..40)
+            .rev()
+            .map(|n| (32 + 2 * n, 33 + 2 * n))
+            .chain([
+                (8, 12),
+                (2, 6),
+                (4, 10),
+                (6, 8),
+                (10, 13),
+                (4, 5),
+                (2, 7),
+                (20, 21),
+            ])
+            .collect();
+        let mut ranges = AskedRanges::new();
+        for (i, &(first, last)) in queries.iter().enumerate() {
+            ranges.insert(first, last);
+            for start in 0..112 {
+                for end in start + 1..113 {
+                    let expected = queries[..=i].iter().any(|&(a, b)| a <= start && end <= b);
+                    assert_eq!(
+                        ranges.covers(start, end),
+                        expected,
+                        "{start}..{end} after {i}"
+                    );
+                }
+            }
+        }
+        assert!(!ranges.covers(2, 13));
+        assert!(!ranges.covers(6, 13));
+        ranges.clear();
+        assert!(ranges.is_empty());
+        assert!(!ranges.covers(2, 6));
+        ranges.insert(2, 6);
+        assert!(ranges.covers(3, 5));
+    }
 
     #[test]
     fn written_pages_are_reported_to_every_asker() {

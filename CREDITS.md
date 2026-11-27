@@ -308,3 +308,16 @@ The adaptation uses the existing integer lowering path and DXIL packed
 dot intrinsic. Synthetic GPU readback under GE-Proton11-14 verifies signed
 bytes, an existing accumulator and wrapping results. This does not yet
 establish complete upscaler support or a title frame-rate improvement.
+
+## Indexed write-watch coverage
+
+Large submission coverage lookup follows unmerged
+[`DoubleGhosty/cool_fox` PR 5](https://github.com/DoubleGhosty/cool_fox/pull/5),
+head `bbcb014787a3454c4361ecce486de44816463ee8`. That PR is closed because
+its upstream main branch adopted a larger concurrent journal refactor.
+This adaptation retains bittersweet's journal and indexes only its queried
+ranges. Overlapping or adjacent queries do not imply union coverage.
+Seven focused tests pass under GE-Proton11-14, including exhaustive
+comparison with the prior linear containment rule through promotion and
+reset. A local optimized microbenchmark of 20,000 lookups over 1,024
+ranges improves from 4.05 ms to 0.22 ms; title frame-rate gains are unverified.

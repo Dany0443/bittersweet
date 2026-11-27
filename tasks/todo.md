@@ -5,8 +5,9 @@
 Acceptance: GPU writes through the probe helper are read correctly by the
 CPU; private and mapped memory results are distinguished. Verify with the
 focused Windows-target GPU test and the runtime probe. Dependencies: none.
-Scope: small, inplace.rs and provenance. Helper fix is committed; runtime
-import coherence must be rechecked with the rebuilt executable.
+Scope: small, inplace.rs and provenance. Helper fix is committed. The rebuilt runtime probe verifies private
+memory CPU/GPU reads and writes; mapped sections fail data-coherence
+checks and must retain copies.
 
 ## 2. Port packed-byte shader arithmetic
 
@@ -46,8 +47,11 @@ reports copy counts, memory use and frame times. Dependencies: tasks 3 and
 
 Acceptance: coverage answers match the existing linear reference for
 overlapping and touching original queries; local measurements establish
-lookup cost and title behavior. Inspect unmerged cool_fox PR 5 at its
-current head before porting. Dependencies: none. Scope: small, watch.rs and
+lookup cost and title behavior. PR 5 was inspected at head
+`bbcb014787a3454c4361ecce486de44816463ee8`: closed and unmerged after
+upstream adopted a larger journal refactor. This tree retains its existing
+journal. The coverage index and seven focused tests pass under Proton;
+the local lookup benchmark improves. Title measurement remains pending. Dependencies: none. Scope: small, watch.rs and
 focused tests. Do not infer frame-rate gains from a microbenchmark alone.
 
 ## 7. Verify memory placement before enabling it
