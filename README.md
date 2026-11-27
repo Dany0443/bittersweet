@@ -72,6 +72,19 @@ ACCC compute containers are parsed and translated through the same native
 shader path. Some upscaler instructions remain unsupported, so this does
 not yet establish a working console upscale.
 
+## Reported hardware results
+
+These are user reports from 2026-11-27, not controlled benchmarks. Results
+apply to the tested Linux/Proton setup and may change between builds.
+
+| GPU | Architecture | Reported result | Remaining issues |
+|---|---|---|---|
+| Radeon RX 7600 | RDNA 3 | Opens reliably, reaches interactive 3D at about 3 to 4 fps and responds to keyboard input. About 40% GPU use and 3 GB VRAM occupied were reported. The Lucia/Jason loading screen reaches about 30 fps. | Intro video stutters. Character materials and some objects render incorrectly or remain black. Sustained mission play at 20 to 30 fps is unverified. |
+| Radeon RX 5700 | RDNA 1 | A second PC, tested by the maintainer's friend, reaches the menu. | Rendering beyond the menu is unverified. Driver, Proton version and complete PC specifications were not supplied. |
+
+GPU utilization and allocated VRAM alone do not identify the bottleneck.
+The RX 7600 results remain below the playable performance target.
+
 ## Layout
 
 | Path | What it is |
