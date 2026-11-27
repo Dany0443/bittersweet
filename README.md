@@ -91,7 +91,8 @@ Experimental: `VICTORY_WINDOW_REUSE=1` reuses overlapping buffer copies.
 It stays off by default while memory use and rendering are compared.
 
 For pipeline diagnostics, `VICTORY_NATIVE_COMPUTE=1` enables the experimental
-native compute creation method. Use it in a separate test run.
+native compute creation method. Leave it unset for gameplay. The RX 7600
+test presented a black screen with it enabled.
 
 ## Details
 

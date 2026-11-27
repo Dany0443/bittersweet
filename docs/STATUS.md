@@ -57,6 +57,15 @@ at least 500 draws. The monitor stopped it after 75 seconds, at 902 MiB
 available RAM and 383 MiB free swap. The run still dropped draws for
 missing pipelines and did not establish a gameplay speedup.
 
+The experimental native compute path translated at least 256 creation
+requests under Proton. At least 1,024 requests still lacked a usable
+translation. The enabled trial presented one draw per frame and a black
+window at the observed startup checkpoint. It was stopped manually after
+64 seconds. The same executable with the switch off reached the world.
+This path remains opt-in. The test validates that real descriptions reach
+the translator, while the rendered output and execution of the translated
+programs still need investigation.
+
 ## What works today
 
 | Area | State |
