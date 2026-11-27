@@ -1750,6 +1750,69 @@ mod tests {
 #[cfg(test)]
 mod mesh_as_compute_tests {
     use super::*;
+    use crate::native::{MeshIo, StageIo};
+
+    #[test]
+    fn fallback_emits_compute_dxil_and_native_mesh_keeps_mesh_dxil() {
+        let native = NativeProgram {
+            stage: HwStage::Ms,
+            wave64: false,
+            vgprs: 4,
+            layout: vec![],
+            used: vec![],
+            io: StageIo::Ms(MeshIo {
+                outputs: vec![],
+                clip_cntl: 0,
+                threads: 32,
+                max_vertices: 3,
+                max_primitives: 1,
+                topology: 2,
+                lds_bytes: 0,
+            }),
+            code: 0xBF81_0000u32.to_le_bytes().to_vec(), // s_endpgm
+        };
+        let position = container::SigElement {
+            name: "SV_Position".into(),
+            index: 0,
+            kind: 3,
+            comp: 9,
+            interp: 0,
+            row: Some(0),
+            col: 0,
+            cols: 4,
+            usage: 0xF,
+            half: false,
+        };
+        let outputs = container::signature(&[position], false);
+        let bytes = crate::dxbc::build(&[(FourCC::OSG1, &outputs)]);
+        let c = Container::parse(&bytes).unwrap();
+        let p = ir::build(&native.code, native.wave64, native.vgprs).unwrap();
+        let st = structure::structure(&p).unwrap();
+        let io = io::raise(&p, &native).unwrap();
+        let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
+        let fallback = emit_mesh_as_compute(&c, &native, &p, &st, &io, &res).unwrap();
+        let (mesh, _) = emit_program(&c, &native, &p, &st, &io, &res).unwrap();
+
+        let word = |bytes, offset| crate::dxbc::u32_at(bytes, offset).unwrap();
+        for (shader, stage, kind) in [(&fallback.compute, HwStage::Cs, 5), (&mesh, HwStage::Ms, 13)] {
+            assert_eq!(shader.stage, stage);
+            let emitted = Container::parse(&shader.dxil).unwrap();
+            assert_eq!(word(emitted.part(FourCC::DXIL).unwrap().data, 0), kind << 16 | 0x66);
+            let psv = emitted.part(FourCC::PSV0).unwrap().data;
+            assert_eq!(u32::from(psv[4 + 24]), kind);
+            assert_eq!((word(psv, 40), word(psv, 44), word(psv, 48)), (32, 1, 1));
+            assert_eq!(emitted.part(FourCC::PSG1).is_some(), stage == HwStage::Ms);
+            let output = emitted.part(FourCC::OSG1).unwrap().data;
+            assert_eq!(word(output, 0), u32::from(stage == HwStage::Ms));
+            if stage == HwStage::Cs {
+                assert_eq!(word(psv, 52), 1);
+                assert_eq!(word(psv, 64), MESH_OUT_SPACE);
+                assert_eq!(word(psv, 68), 1); // u1: triangle indices
+            }
+        }
+        let vertex = Container::parse(&fallback.vertex.dxil).unwrap();
+        assert_eq!(word(vertex.part(FourCC::OSG1).unwrap().data, 0), 1);
+    }
 
     /// `MeshLayout::bytes` for a group that has two vertices and one triangle,
     /// each vertex record four dwords, no primitive outputs.

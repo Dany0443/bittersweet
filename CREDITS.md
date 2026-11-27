@@ -468,6 +468,11 @@ selected when the host reports mesh shader support. Direct dispatches whose
 output would exceed 32 MiB are refused to bound allocation size; indirect
 output is capped by the conversion buffer budget.
 
+The fallback DXIL stage correction follows the same snapshot's
+`Shader::finish`: retain mesh state while lowering exports to UAV writes,
+then remove mesh metadata and I/O signatures before serializing the
+compute entry point. The passthrough vertex shader keeps the output signature.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from

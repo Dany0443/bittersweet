@@ -2384,6 +2384,15 @@ impl<'a> Lower<'a> {
         let root_uavs = self.s.root_uavs.iter().map(|r| r.0).collect();
         let cmp_samplers = self.s.cmp_samplers;
         let wave_size = self.s.wave_size;
+        if self.x.mesh_as_compute {
+            // Mesh state is needed for lowering exports into UAV writes.
+            // Only the compute thread group and resource bindings belong
+            // in the finished shader. The passthrough VS owns the outputs.
+            self.s.mesh = None;
+            self.s.inputs.clear();
+            self.s.outputs.clear();
+            self.s.prims.clear();
+        }
         Ok(Lowered {
             wave_size,
             cmp_samplers,
