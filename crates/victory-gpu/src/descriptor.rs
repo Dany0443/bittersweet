@@ -12,6 +12,8 @@ use crate::resource::{Memory, PAGEABLE_IIDS};
 
 #[cfg(any(windows, test))]
 pub(crate) mod buffer_sweep;
+#[cfg(any(windows, test))]
+mod remaps;
 #[cfg(windows)]
 pub(crate) mod host;
 

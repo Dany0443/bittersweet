@@ -1392,23 +1392,18 @@ impl State {
             .find(|h| !h.samplers())?;
         let host = heap.host()?;
         let gpu = host.strides_gpu()?;
-        // One key per list, as textures have: no title resource is there.
-        const ONCE: usize = usize::MAX - 0x5e;
-        if !list.first_use(ONCE) {
+        let buffer = host.strides_buffer()?;
+        if !list.first_use(buffer.as_raw() as usize) {
             return Some(gpu);
         }
-        // The list may outlive the title's heap object, which owns the table.
-        if let Some(buffer) = host.strides_buffer() {
-            list.keep(buffer);
-        }
-        // The pass itself once per frame: per list it ran up to 51 times a
+        list.keep(buffer);
+        // The pass itself once per heap per frame: per list it ran up to 51 times a
         // frame over 81,000 views and 4,100 host copies, 18 s of every
         // frame (2026-11-24, run 11).
         // shortcut: what the title writes into such buffers between lists
         // of one frame is seen a frame late.
-        static FRAME: AtomicU64 = AtomicU64::new(u64::MAX);
         let frame = crate::frame::current();
-        if FRAME.swap(frame, Ordering::Relaxed) == frame {
+        if host.buffer_frame.swap(frame, Ordering::Relaxed) == frame {
             return Some(gpu);
         }
         let started = std::time::Instant::now();

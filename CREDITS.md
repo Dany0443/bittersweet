@@ -562,3 +562,7 @@ from [DexNom/VIctory PR #64](https://github.com/DexNom/VIctory/pull/64)
 at `3f48fd433e1ebb058f1c27abba770cd26dd08e07`. Bittersweet bounds reads of
 the description and its blocks and validates the root layout before using
 its existing shader translator.
+
+Per-heap texture remap delivery follows [Vice-Tay PR #371](https://github.com/TaynanGT/Vice-Tay/commit/bc44a9fc22c437d64e72f3e68e956e9c5cebe26d)
+at `bc44a9fc22c437d64e72f3e68e956e9c5cebe26d`. Bittersweet uses a bounded
+shared history with an independent cursor for each heap.

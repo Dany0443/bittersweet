@@ -46,6 +46,10 @@ description and wraps its program in an internal shader container. This
 reuses the existing shader translator and pipeline cache. It rejects
 descriptions it cannot read and shaders it cannot translate.
 
+Each view heap tracks its position in a bounded texture remap history.
+If the history discards an unread range, that heap rechecks all its placed
+textures on its next pass.
+
 ## Crates
 
 | Crate | Role |
