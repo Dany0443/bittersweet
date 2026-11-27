@@ -362,3 +362,15 @@ Scalar condition-code operands follow `DoubleGhosty/cool_fox` main
 to VIctory commit `0b35b7f`. The existing scalar flag path supplies the
 Boolean, converted to the instruction's integer operand. Synthetic GPU
 readback checks both comparison results and arithmetic carry flags.
+
+## Experimental Wine mapping server
+
+The private Linux runtime experiment uses the mapping view-tree patch from
+[DoubleGhosty/cool_fox PR 71](https://github.com/DoubleGhosty/cool_fox/pull/71),
+head `856c6cae04539207fe6eb37ecb7806d0183f5c8f`, merged into upstream main.
+The server is built outside this repository from GE-Proton11-14's Wine base
+`a47c73f52fd7b2efafc1c560710f3a5099ae51e0`, its release patches and
+wine-staging `6cc805ea57132eeaf44764e9213823c9b8d0d300`. The complete release
+protocol is regenerated before testing. Synthetic mapping churn and GPU
+readback pass; title frame times improve but remain far from playable.
+No Wine sources or binaries are distributed in this tree by this experiment.

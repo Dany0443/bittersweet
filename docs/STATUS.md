@@ -60,7 +60,20 @@ and process samples found wineserver using 70 to 90 percent of one core.
 These measurements motivate testing the current cool_fox Wine mapping
 optimization; they do not establish its benefit here. An isolated server
 built from GE-Proton's base Wine revision failed the client protocol check
-and was not used for a title test. GE-Proton's complete patch set is needed.
+and was not used for a title test. Reproducing GE-Proton's release patches
+and regenerating the protocol resolved that mismatch.
+
+The matching private server with cool_fox PR 71's mapping view tree passes
+a 16,384-view synthetic test, including data tags, shuffled unmaps and
+overlap rejection. Mapping and unmapping took 500 ms versus 1,032 ms with
+the stock server. A 226-second title comparison with the same executable
+and graphics settings produced substantial 3D samples around 2 to 3 fps;
+mapping time generally fell to single or tens of milliseconds per frame.
+Later multi-second hitches, dropped draws and dark character materials
+remain. These are advancing scenes, not a fixed-camera benchmark or proof
+of mission playability. No device-removal fault occurred before the manual
+stop, which does not establish stability. The original Proton installation
+is unchanged; this server remains an external diagnostic build.
 
 A prebuilt run reached world rendering with no pipelines pending and still
 ran around 0.7 to 1 fps. It stopped after 164 seconds with a RADV GPUVM
