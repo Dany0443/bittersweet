@@ -61,6 +61,8 @@ source .runtime/prefix.env
 Set your game directory using Wine's Windows path format.
 `Z:\games\GTA6` below means `/games/GTA6` on Linux; replace it with your path.
 These are conservative test settings, not a fix for world-loading memory use.
+The texture limit caps background uploads in addition to the driver's VRAM
+budget. The commit reserve leaves headroom in physical RAM and Windows commit.
 
 ```bash
 export VICTORY_GAME_DIR='Z:\games\GTA6'

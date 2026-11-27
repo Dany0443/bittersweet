@@ -1400,39 +1400,48 @@ pub(crate) fn host_made<'a>(
 }
 
 /// Whether more host copies of textures the title fills may be made for
-/// shaders that pick textures by index (`draw.rs` `heap_textures`): always
-/// up to `FLOOR` bytes of them, beyond that while the card's memory in use
-/// by this process is under nine tenths of the budget the system gives it
-/// (`VICTORY_TEXTURE_BUDGET_MB` sets a limit on those copies' bytes
-/// instead). Past the budget the system moves the card's memory into the
-/// PC's, which ended runs 20 and 24.
+/// shaders that pick textures by index (`draw.rs` `heap_textures`).
+/// The configured limit caps the copies' own bytes as well as respecting
+/// the driver's total budget. Without a configured limit a small floor
+/// permits startup kit textures before consulting the driver's budget.
 #[cfg(windows)]
 pub(crate) fn room() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
-    const FLOOR: u64 = 2 << 30;
-    const WITHOUT_BUDGET: u64 = 4 << 30;
     static LIMIT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     let limit = *LIMIT.get_or_init(|| {
         let mb = std::env::var("VICTORY_TEXTURE_BUDGET_MB").ok()?;
-        mb.trim().parse::<u64>().ok().map(|mb| mb << 20)
+        mb.trim()
+            .parse::<u64>()
+            .ok()
+            .map(|mb| mb.saturating_mul(1 << 20))
     });
     let filled = KINDS[1].load(Relaxed);
-    if filled >= FLOOR && commit_short(100) {
+    if commit_short(100) {
         return false;
     }
-    if let Some(limit) = limit {
-        return filled < limit;
+    let video = crate::host::host().and_then(|h| h.video_memory());
+    indexed_texture_room(filled, limit, video)
+}
+
+#[cfg(any(test, windows))]
+fn indexed_texture_room(filled: u64, limit: Option<u64>, video: Option<[u64; 4]>) -> bool {
+    const FLOOR: u64 = 2 << 30;
+    const WITHOUT_BUDGET: u64 = 4 << 30;
+    if limit.is_some_and(|limit| filled >= limit) {
+        return false;
     }
-    if filled < FLOOR {
+    if limit.is_none() && filled < FLOOR {
         return true;
     }
-    match crate::host::host().and_then(|h| h.video_memory()) {
-        Some([budget, used, ..]) => used < budget / 10 * 9,
-        None => filled < WITHOUT_BUDGET,
+    match video {
+        Some([budget, used, ..]) if budget > 0 => {
+            u128::from(used) * 10 < u128::from(budget) * 9
+        }
+        _ => filled < limit.unwrap_or(WITHOUT_BUDGET),
     }
 }
 
-/// Windows commit the texture queue leaves free, in bytes:
+/// Physical RAM and Windows commit the texture queue leaves free, in bytes:
 /// `VICTORY_COMMIT_RESERVE_MB` (0 by default; at most 32,768). VRAM-backed
 /// textures also consume system commit, so this can leave headroom on 16 GB
 /// RAM systems. Adapted from LoverCatys/ruff-lab commit `3f43861`, which
@@ -1448,7 +1457,7 @@ fn commit_reserve() -> u64 {
         if reserve > 0 {
             tracing::info!(
                 reserve_mb = reserve >> 20,
-                "VICTORY_COMMIT_RESERVE_MB: limiting new indexed textures under commit pressure"
+                "VICTORY_COMMIT_RESERVE_MB: limiting indexed textures under memory pressure"
             );
         }
         reserve
@@ -1483,9 +1492,10 @@ fn commit_short(percent: u64) -> bool {
         if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 {
             return false;
         }
-        LEFT.store(status.ullAvailPageFile, Relaxed);
+        let left = status.ullAvailPageFile.min(status.ullAvailPhys);
+        LEFT.store(left, Relaxed);
         LAST.store(tenth, Relaxed);
-        status.ullAvailPageFile
+        left
     };
     short_of_commit(left, reserve, percent)
 }
@@ -2489,6 +2499,20 @@ static RESOURCE_FUNCTIONS: Table<32> = {
 mod tests {
     use super::*;
     use crate::object::slot;
+
+    #[test]
+    fn indexed_texture_limit_also_respects_total_vram_use() {
+        const GIB: u64 = 1 << 30;
+        let limit = Some(2 * GIB);
+        let room = Some([8000, 7199, 0, 0]);
+        let full = Some([8000, 7200, 0, 0]);
+        assert!(indexed_texture_room(GIB, limit, room));
+        assert!(!indexed_texture_room(GIB, limit, full));
+        assert!(!indexed_texture_room(2 * GIB, limit, room));
+        assert!(indexed_texture_room(GIB, limit, Some([0; 4])));
+        assert!(indexed_texture_room(GIB, None, full));
+        assert!(!indexed_texture_room(4 * GIB, None, None));
+    }
 
     #[test]
     fn commit_reserve_only_blocks_below_the_configured_headroom() {
