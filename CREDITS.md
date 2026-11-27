@@ -454,3 +454,12 @@ to share signature and lowering logic between normal and compute-lowered paths,
 and gates the compute path explicitly on the `mesh_as_compute` flag in
 `lower::Parts` so RDNA 2+, RDNA 3, RDNA 4, and NVIDIA paths continue to use
 native mesh shaders unchanged.
+
+### Movie-plane upload ownership
+
+Adapted the per-list CPU movie-plane upload technique from
+[Pavl3000/cgbj-fork commit 8cc31ab37afcae231e46696042342bb5af2f0f2a](https://github.com/Pavl3000/cgbj-fork/commit/8cc31ab37afcae231e46696042342bb5af2f0f2a),
+originally authored by codec_d. This port reuses bittersweet's list-owned
+upload buffers and conservative submission callbacks. A synthetic GPU
+readback test covers changed frames after unchanged frames. Real intro
+playback cadence remains unverified.

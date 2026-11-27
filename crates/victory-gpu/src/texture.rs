@@ -528,16 +528,33 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
     };
     use std::sync::atomic::Ordering::Relaxed;
     staging.used.store(crate::host::moment(), Relaxed);
+    let movie = staging.movie_plane();
     // The host texture has the staging buffer's contents: only the check
     // at submission is left, and what it finds changed the next list that
     // samples the texture uploads (a frame late where every list of the
     // frame was recorded before that check).
-    if staging.uploaded.load(Relaxed) && !staging.dirty.load(Relaxed) {
+    if !movie && staging.uploaded.load(Relaxed) && !staging.dirty.load(Relaxed) {
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(crate::copystat::C::TexSkipped, 1);
         list.defer_texture(staging);
         return;
     }
+    let source = if movie {
+        let Some(host) = host() else {
+            return;
+        };
+        let pitch = staging.footprints[0].Footprint.RowPitch as usize;
+        let bytes = pitch * staging.rows[0] as usize;
+        let Some((buffer, data)) = list.upload(host, bytes as u64) else {
+            return;
+        };
+        let plane = staging.clone();
+        let destination = data as usize;
+        list.defer(move || plane.fill_movie_plane(destination, bytes, pitch));
+        buffer
+    } else {
+        staging.buffer.clone()
+    };
     #[cfg(feature = "diagnostics")]
     crate::copystat::add(crate::copystat::C::TexUploads, 1);
     const COPY_DEST: u32 = 0x400;
@@ -549,7 +566,7 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
         {
             let f = footprint.Footprint;
             // SAFETY: live resources.
-            let (gpu, d) = unsafe { (staging.buffer.GetGPUVirtualAddress(), texture.GetDesc()) };
+            let (gpu, d) = unsafe { (source.GetGPUVirtualAddress(), texture.GetDesc()) };
             let len = u64::from(f.RowPitch) * u64::from(staging.rows[i]) * u64::from(f.Depth);
             list.note_read(
                 || {
@@ -582,7 +599,7 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
         };
         let from = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: as above.
-            pResource: unsafe { std::mem::transmute_copy(&staging.buffer) },
+            pResource: unsafe { std::mem::transmute_copy(&source) },
             Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
             Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
                 PlacedFootprint: *footprint,
@@ -590,6 +607,9 @@ pub(crate) fn upload_from(list: &HostList, resource: This, texture: &ID3D12Resou
         };
         // SAFETY: an open list; both locations name live resources.
         unsafe { list.list.CopyTextureRegion(&to, 0, 0, 0, &from, None) };
+    }
+    if movie {
+        return;
     }
     // When the list is submitted, its copy takes what the staging buffer
     // holds by then: noted before the check below, which sets `dirty`
@@ -609,6 +629,41 @@ impl Staging {
     /// The title memory the texture is read from: address and bytes.
     pub(crate) fn memory(&self) -> (usize, usize) {
         (self.memory as usize, self.size)
+    }
+
+    fn movie_plane(&self) -> bool {
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8_UNORM;
+        let desc = &self.layout.desc;
+        desc.dimension == victory_formats::texture::Dimension::Tex2d
+            && desc.swizzle.0 == 0
+            && desc.depth == 1
+            && desc.mips == 1
+            && desc.samples == 1
+            && self.footprints.len() == 1
+            && self.footprints[0].Offset == 0
+            && self.footprints[0].Footprint.Format == DXGI_FORMAT_R8_UNORM
+    }
+
+    fn fill_movie_plane(&self, destination: usize, bytes: usize, pitch: usize) {
+        let _reading = crate::watch::title_memory_reading(self.memory as usize, self.size);
+        // SAFETY: the list owns this mapped allocation until its fence completes.
+        let output = unsafe { std::slice::from_raw_parts_mut(destination as *mut u8, bytes) };
+        output.fill(0);
+        let mip = &self.layout.mips[0];
+        if mip.offset == 0
+            && mip.pitch as usize * self.layout.desc.element_bytes as usize == pitch
+            && bytes <= self.size
+            && crate::host::read_into(self.memory, output)
+        {
+            return;
+        }
+        with_read(self.size, |read| {
+            crate::host::copy_mapped(read.as_mut_ptr(), self.memory, self.size, false);
+            if let Err(error) = self.layout.detile(read, 0, 0, output, pitch, bytes) {
+                output.fill(0);
+                once!(?error, "movie plane could not be uploaded");
+            }
+        });
     }
 
     /// The mip and the array slice of the `i`th part of the staging buffer.

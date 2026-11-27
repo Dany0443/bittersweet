@@ -2742,6 +2742,88 @@ mod tests {
         assert_eq!(t, u64::MAX, "no second subresource");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn movie_plane_updates_after_unchanged_frames() {
+        use windows::Win32::Graphics::Direct3D12::*;
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8_UNORM;
+        let Some(host) = crate::host::host() else {
+            return;
+        };
+        let null = std::ptr::null();
+        let desc = ResourceDesc {
+            layout: 1,
+            ..texture(16, 4, 61, 1)
+        };
+        let mut image = null;
+        assert_eq!(
+            create_committed(
+                null,
+                &PROPERTIES,
+                0,
+                &desc,
+                0x400,
+                null.cast(),
+                &RESOURCE_IIDS[0],
+                &mut image
+            ),
+            S_OK
+        );
+        let (memory, _) = texture_memory(image).unwrap();
+        let bytes = super::footprint(&desc).unwrap().size as usize;
+        let texture = host_resource(image).unwrap();
+        let back = host.read_back_buffer(1024).unwrap();
+        let footprint = D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+            Offset: 0,
+            Footprint: D3D12_SUBRESOURCE_FOOTPRINT {
+                Format: DXGI_FORMAT_R8_UNORM,
+                Width: 16,
+                Height: 4,
+                Depth: 1,
+                RowPitch: 256,
+            },
+        };
+        for value in [0x11u8, 0x11, 0x11, 0x77, 0x33, 0x99] {
+            // SAFETY: private synthetic texture memory, idle between submissions.
+            unsafe { std::ptr::write_bytes(memory.cast_mut(), value, bytes) };
+            let commands = host.new_list().unwrap();
+            crate::texture::upload_from(&commands, image, texture, 0);
+            crate::list::ensure_state(&commands, image, 0x800);
+            let to = D3D12_TEXTURE_COPY_LOCATION {
+                pResource: unsafe { std::mem::transmute_copy(&back) },
+                Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+                Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                    PlacedFootprint: footprint,
+                },
+            };
+            let from = D3D12_TEXTURE_COPY_LOCATION {
+                pResource: unsafe { std::mem::transmute_copy(texture) },
+                Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+                Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
+                    SubresourceIndex: 0,
+                },
+            };
+            unsafe { commands.list.CopyTextureRegion(&to, 0, 0, 0, &from, None) };
+            commands.close();
+            host.execute(&[&commands]);
+            unsafe {
+                let mut data = std::ptr::null_mut();
+                back.Map(0, None, Some(&mut data)).unwrap();
+                let pixels = std::slice::from_raw_parts(data.cast::<u8>(), 1024);
+                for row in 0..4 {
+                    assert!(
+                        pixels[row * 256..row * 256 + 16]
+                            .iter()
+                            .all(|&b| b == value),
+                        "movie plane did not upload current value {value:#x}"
+                    );
+                }
+                back.Unmap(0, None);
+            }
+        }
+        object::release(image);
+    }
+
     /// A 4x4 texture filled from a title buffer through our list and queue,
     /// then read back from the host GPU.
     #[cfg(windows)]
