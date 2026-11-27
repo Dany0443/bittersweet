@@ -561,6 +561,24 @@ pub(crate) fn pipeline(
     load: impl FnOnce(&ID3D12PipelineLibrary1, PCWSTR) -> windows::core::Result<ID3D12PipelineState>,
     create: impl FnOnce() -> windows::core::Result<ID3D12PipelineState>,
 ) -> windows::core::Result<ID3D12PipelineState> {
+    let create = || {
+        static TRACE: OnceLock<bool> = OnceLock::new();
+        if !*TRACE.get_or_init(|| std::env::var_os("VICTORY_PSO_TRACE").is_some_and(|v| v == "1")) {
+            return create();
+        }
+        let shaders = LABEL.with(|label| label.borrow().clone());
+        let thread = crate::host::thread_id();
+        let start = std::time::Instant::now();
+        tracing::info!(name, %shaders, thread, "creating host pipeline");
+        let result = create();
+        tracing::info!(
+            name, %shaders, thread,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            error = ?result.as_ref().err().map(|e| e.code()),
+            "host pipeline creation returned"
+        );
+        result
+    };
     let wide = HSTRING::from(name);
     let Some(library) = library() else {
         MADE.fetch_add(1, Ordering::Relaxed);

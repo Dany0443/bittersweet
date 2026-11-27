@@ -473,6 +473,13 @@ The fallback DXIL stage correction follows the same snapshot's
 then remove mesh metadata and I/O signatures before serializing the
 compute entry point. The passthrough vertex shader keeps the output signature.
 
+### Process termination and pipeline diagnostics
+
+Bittersweet records intercepted abnormal title termination in the existing
+crash log. `VICTORY_PSO_TRACE=1` also logs the start and result of host pipeline
+creation with its cache key and shader labels. These diagnostics were added
+after the RX 5700 runs that ended with code 3 without a crash entry.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from

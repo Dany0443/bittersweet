@@ -233,26 +233,39 @@ pub extern "system" fn OutputDebugStringW(text: *const u16) {
 /// the code and the caller, then exits on the host.
 pub extern "C" fn exit(code: i32) -> ! {
     tracing::warn!(code, from = %host::callers(), "title exits");
+    if code != 0 {
+        record_termination("exit", Some(code as u32));
+    }
     host::exit(code)
 }
 
 /// The CRT's `abort` (also reached from `terminate`): logged like [`exit`].
 pub extern "C" fn abort() -> ! {
-    tracing::error!(from = %host::callers(), "title aborts");
+    record_termination("abort", None);
     host::abort()
 }
 
 /// The CRT's `terminate` and the STL's invalid-argument exit: logged, then
 /// the host's `abort`.
 pub extern "C" fn terminate() -> ! {
-    tracing::error!(from = %host::callers(), "title calls terminate");
+    record_termination("terminate", None);
     host::abort()
 }
 
 /// See [`terminate`].
 pub extern "C" fn _invalid_parameter_noinfo_noreturn() -> ! {
-    tracing::error!(from = %host::callers(), "title passed an invalid parameter");
+    record_termination("_invalid_parameter_noinfo_noreturn", None);
     host::abort()
+}
+
+/// An explicit termination can bypass the unhandled exception and panic hooks.
+fn record_termination(api: &str, code: Option<u32>) {
+    let callers = host::callers();
+    tracing::error!(api, ?code, from = %callers, "title process termination");
+    #[cfg(windows)]
+    victory_loader::log_crash(&format!(
+        "VIctory: title called {api}, exit code {code:?}, callers {callers}\n"
+    ));
 }
 
 /// The title's unhandled-exception filter. Ours stands in front of it and
@@ -281,6 +294,9 @@ extern "system" fn report_unhandled(info: *const c_void) -> i32 {
 pub extern "system" fn TerminateProcess(process: *mut c_void, code: u32) -> i32 {
     if process as isize == -1 {
         tracing::warn!(code, from = %host::callers(), "title terminates the process");
+        if code != 0 {
+            record_termination("TerminateProcess", Some(code));
+        }
     }
     host::terminate_process(process, code)
 }
