@@ -29,6 +29,15 @@ frame to title memory changes overlapping unfinished shader writes.
 Reported card load was typically low and the denser samples still dropped
 423 to 1,378 draws for missing pipelines. Neither run logged device loss.
 
+The per-heap texture remap regression passed on Proton using two D3D12
+view heaps. Both heaps scheduled the texture update independently. On the
+RX 7600, the warmed build reached early world rendering. The first
+world sweep found that its remap history had expired and scheduled a
+rescan of 21,039 placed slots. The memory monitor stopped the run after
+45 seconds with 986 MiB RAM available and 49 MiB free swap. No dense
+world sample followed, so the run leaves material appearance and
+sustained frame rate unverified.
+
 The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
 PR #139. The corrected lowering passes GPU readback checks for signed and
 unsigned min/max, zero, equal operands and selected values under Proton.
