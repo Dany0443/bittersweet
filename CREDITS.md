@@ -153,7 +153,7 @@ All entries below come from DexNom/VIctory (GPL-3.0-or-later).
 
 - Cube gradient mip selection, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Use DXIL base-2 Log directly and honor the instruction minimum LOD before SampleLevel. Add mip-capable synthetic cube views without changing the existing single-mip view constructor.
 
-- Sparse texture residency, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Count committed interior mip regions even when the first and last pages are absent, while retaining the existing fast page-query paths for ordinary allocations. Add a reserved-memory regression test.
+- Sparse texture residency, commit `921d8d3b43b44f3a6ca4b44095edd3c4baf10a87`: Count committed interior mip regions even when the first and last pages are absent, while retaining the existing fast page-query paths for ordinary allocations. Add a reserved-memory regression test. The `any_mapped` helper and its integration into the texture sweep (`crates/victory-gpu/src/descriptor/host.rs`) are ported from the same commit.
 
 ## cool_fox adaptations
 

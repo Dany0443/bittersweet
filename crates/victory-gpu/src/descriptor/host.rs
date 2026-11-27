@@ -1148,17 +1148,18 @@ impl HostHeap {
                 continue;
             }
             let start = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-            if !crate::texture::committed(start as *const u8, 1) {
-                counts[4] += 1;
-                continue;
-            }
-            let (claim, against) = {
+            let (bytes, claim, against) = {
                 let mut placed = self.placed.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(bytes) = placed.bytes(&resource, crate::resource::first_mip(&desc)) else {
                     continue;
                 };
-                placed.claim(index, start, start.saturating_add(bytes), &resource)
+                let (claim, against) = placed.claim(index, start, start.saturating_add(bytes), &resource);
+                (bytes, claim, against)
             };
+            if !crate::texture::any_mapped(start as usize, bytes as usize) {
+                counts[4] += 1;
+                continue;
+            }
             counts[5 + claim as usize] += 1;
             counts[9] += u64::from(other);
             static SAID: [std::sync::atomic::AtomicU32; 4] = [const { std::sync::atomic::AtomicU32::new(0) }; 4];

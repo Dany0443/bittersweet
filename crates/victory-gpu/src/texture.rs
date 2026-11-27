@@ -1058,6 +1058,22 @@ pub(crate) fn mapped_bytes(at: *const u8, len: usize) -> u64 {
 }
 
 fn mapped_regions(start: usize, end: usize) -> u64 {
+    mapped_regions_impl(start, end, false)
+}
+
+/// The sweep only needs to discover whether a texture has any data to stage.
+pub(crate) fn any_mapped(start: usize, len: usize) -> bool {
+    let end = start.saturating_add(len);
+    if start == end {
+        return false;
+    }
+    if committed(start as *const u8, 1) {
+        return true;
+    }
+    (end - 1) / 4096 > start / 4096 && mapped_regions_impl(start, end, true) > 0
+}
+
+fn mapped_regions_impl(start: usize, end: usize, first_only: bool) -> u64 {
     use windows_sys::Win32::System::Memory::{
         MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, VirtualQuery,
     };
@@ -1075,6 +1091,9 @@ fn mapped_regions(start: usize, end: usize) -> u64 {
         }
         if info.State == MEM_COMMIT && info.Protect & (PAGE_NOACCESS | PAGE_GUARD) == 0 {
             there += (next - p) as u64;
+            if first_only {
+                break;
+            }
         }
         p = next;
     }
@@ -1213,17 +1232,17 @@ mod title_memory_tests {
         const BLOCK: usize = 64 << 10;
         // SAFETY: this private reservation is ours throughout the test.
         unsafe {
-            let base =
-                VirtualAlloc(std::ptr::null(), 5 * BLOCK, MEM_RESERVE, PAGE_NOACCESS).cast::<u8>();
+            let base = VirtualAlloc(std::ptr::null(), 5 * BLOCK, MEM_RESERVE, PAGE_NOACCESS).cast::<u8>();
             assert!(!base.is_null());
             let middle = base.add(2 * BLOCK);
-            assert_eq!(
-                VirtualAlloc(middle.cast(), BLOCK, MEM_COMMIT, PAGE_READWRITE),
-                middle.cast()
-            );
+            assert_eq!(VirtualAlloc(middle.cast(), BLOCK, MEM_COMMIT, PAGE_READWRITE), middle.cast());
             assert_eq!(super::mapped_bytes(base, 5 * BLOCK), BLOCK as u64);
+            assert!(super::any_mapped(base as usize, 5 * BLOCK));
+            assert_eq!(super::mapped_bytes(base.add(BLOCK - 3), 2 * BLOCK + 9), BLOCK as u64);
+            assert_eq!(super::mapped_bytes(base, 2 * BLOCK), 0);
             assert_ne!(VirtualFree(middle.cast(), BLOCK, MEM_DECOMMIT), 0);
             assert_eq!(super::mapped_bytes(base, 5 * BLOCK), 0);
+            assert!(!super::any_mapped(base as usize, 5 * BLOCK));
             assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
         }
     }
