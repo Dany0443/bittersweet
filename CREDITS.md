@@ -521,6 +521,14 @@ commit `a26859f`. Each step reads an active lane's partial sum, gives
 empty subtrees zero, and keeps the console's half-precision rounding.
 The GPU readback exercises eight active lane counts.
 
+### Raw title memory copy-back
+
+Adapted the separate raw-memory write tracking from
+Linox-IDK/LNX-victory commit `eca04c7`. Bittersweet classifies writes
+with its existing native instruction scan. Descriptor writes keep their
+own copy-back ranges; raw stores, atomics and unknown code keep the
+conservative treatment for the whole address directory.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from

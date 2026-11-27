@@ -135,9 +135,10 @@ impl Shader {
 pub(crate) struct Translated {
     pub(crate) host: victory_shader::emit::HostShader,
     pub(crate) used: Vec<victory_shader::UsedResource>,
-    /// Whether the shader's code can store to buffer memory ([`stores`]);
-    /// true when its code is not known.
+    /// Whether the shader can write a host copy of a title buffer.
     pub(crate) stores: bool,
+    /// Whether it can write through a raw guest address.
+    pub(crate) raw_stores: bool,
 }
 
 #[cfg(windows)]
@@ -210,7 +211,13 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         None => Vec::new(),
     };
     let host = crate::shader_cache::host_shader(container)?;
-    let stores = programs.is_empty() || programs.iter().any(stores);
+    let writes = programs
+        .iter()
+        .map(|program| buffer_writes(&program.code))
+        .max()
+        .unwrap_or(BufferWrites::RawAddress);
+    let stores = writes != BufferWrites::None;
+    let raw_stores = writes == BufferWrites::RawAddress;
     let used = programs
         .into_iter()
         .find(|p| {
@@ -221,7 +228,12 @@ fn translate(container: &[u8]) -> Result<Translated, String> {
         })
         .map(|p| p.used)
         .unwrap_or_default();
-    Ok(Translated { host, used, stores })
+    Ok(Translated {
+        host,
+        used,
+        stores,
+        raw_stores,
+    })
 }
 
 /// The compute pipelines of the console's ray-tracing structure builder
@@ -339,33 +351,42 @@ pub(crate) fn builder_runs() -> bool {
     true
 }
 
-/// Whether a console program can store to buffer memory: it has a buffer,
-/// typed-buffer, scalar-memory, flat or global store or atomic, or code
-/// that is not all known (an instruction of those kinds outside our table,
-/// an indirect jump, code that does not decode). Stores to textures
-/// (image instructions) and to the program's own scratch memory do not
-/// count: neither reaches a buffer's host copy. After upstream #413,
-/// which leaves scalar-memory stores out and counts image stores.
-#[cfg(windows)]
-fn stores(program: &victory_shader::NativeProgram) -> bool {
+/// Raw addresses can name any of the memory directory's copies. Writes
+/// through descriptors instead use the ranges tracked at bind time.
+#[cfg(any(test, windows))]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum BufferWrites {
+    None,
+    Descriptor,
+    RawAddress,
+}
+
+#[cfg(any(test, windows))]
+fn buffer_writes(bytes: &[u8]) -> BufferWrites {
     use victory_shader::gfx10::{Encoding, decode};
-    let Ok(code) = decode(&program.code) else {
-        return true;
+    let Ok(code) = decode(bytes) else {
+        return BufferWrites::RawAddress;
     };
-    code.iter().any(|i| {
-        let name = i.name();
-        match i.encoding {
-            Encoding::Mubuf
-            | Encoding::Mtbuf
-            | Encoding::Smem
-            | Encoding::Flat
-            | Encoding::Global => name.is_none_or(|n| {
-                (n.contains("store") || n.contains("atomic")) && !n.contains("scratch")
-            }),
-            Encoding::Sop1 => name.is_none_or(|n| matches!(n, "s_setpc_b64" | "s_swappc_b64")),
-            _ => false,
+    let mut writes = BufferWrites::None;
+    for inst in code {
+        let name = inst.name();
+        let store = || {
+            name.is_none_or(|n| (n.contains("store") || n.contains("atomic")) && !n.contains("scratch"))
+        };
+        match inst.encoding {
+            Encoding::Smem | Encoding::Flat | Encoding::Global if store() => {
+                return BufferWrites::RawAddress;
+            }
+            Encoding::Sop1
+                if name.is_none_or(|n| matches!(n, "s_setpc_b64" | "s_swappc_b64")) =>
+            {
+                return BufferWrites::RawAddress;
+            }
+            Encoding::Mubuf | Encoding::Mtbuf if store() => writes = BufferWrites::Descriptor,
+            _ => {}
         }
-    })
+    }
+    writes
 }
 
 #[repr(C)]
@@ -888,6 +909,29 @@ mod tests {
 
     use super::*;
     use crate::object::{S_OK, slot};
+
+    #[test]
+    fn read_only_raw_addresses_do_not_claim_descriptor_writes() {
+        let classify = |words: &[u32]| {
+            let bytes: Vec<_> = words
+                .iter()
+                .copied()
+                .chain([0xBF81_0000]) // s_endpgm
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            buffer_writes(&bytes)
+        };
+        let global_load = [0xDC30_8000, 0x0500_0005];
+        let descriptor_store = [0xE070_0000, 0x8002_0000];
+        assert_eq!(classify(&global_load), BufferWrites::None);
+        assert_eq!(
+            classify(&[global_load, descriptor_store].concat()),
+            BufferWrites::Descriptor
+        );
+        assert_eq!(classify(&[0xDC70_8000, 0x007C_0005]), BufferWrites::RawAddress);
+        assert_eq!(classify(&[0xDCC8_8000, 0x007C_0005]), BufferWrites::RawAddress);
+        assert_eq!(buffer_writes(&[0xff]), BufferWrites::RawAddress);
+    }
 
     fn shaders(p: This) -> Vec<(&'static str, Vec<u8>)> {
         pipeline(p)

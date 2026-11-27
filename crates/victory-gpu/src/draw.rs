@@ -986,7 +986,8 @@ impl State {
                 .root_srvs
                 .contains(&victory_shader::emit::SLOT_MEMORY)
             {
-                let Some(ready) = self.memory_ready(list, compute, writes) else {
+                let raw_writes = writes && (t.raw_stores || !write_skip());
+                let Some(ready) = self.memory_ready(list, compute, raw_writes) else {
                     once!(
                         "a shader that reads title memory by address without a view heap to hold its views: the draw is dropped"
                     );
