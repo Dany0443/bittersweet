@@ -30,6 +30,15 @@ observed before that stop. It establishes neither a performance gain nor
 stability; reuse stays off by default. Stable 20 to 30 fps with complete
 textures and objects remains unachieved.
 
+After rebuilding these ports and warming the pipeline cache, a second trial
+with window reuse disabled reached world rendering at 1.7 to 3.9 fps before
+the monitor stopped it after 63 seconds, at 979 MiB available RAM and no
+free swap. Starting memory and swap conditions differed, so run length and
+frame rates are not a controlled comparison with the reuse trial. The new
+ports do not establish a gameplay performance gain. Linux process mappings
+confirmed substantial resident and swapped memory during loading; CPU
+copying, descriptor sweeps and missing pipelines remain active work.
+
 ## What works today
 
 | Area | State |
