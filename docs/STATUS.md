@@ -38,6 +38,14 @@ rescan of 21,039 placed slots. The memory monitor stopped the run after
 world sample followed, so the run leaves material appearance and
 sustained frame rate unverified.
 
+With `VICTORY_RAY_MISS_ONLY=1`, the RX 7600 reached the 3D world at
+1.2 and 2.3 fps in two samples. Those samples issued 994 and 1,276 draws
+per frame and dropped 1,365 and 982 draws for missing pipelines. The run
+ended at its 155-second limit with no logged GPU fault. Available RAM
+fell as low as 952 MiB, and free swap reached zero. The trial did not
+establish a speedup or verify world material appearance. The mode stays
+opt-in.
+
 The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
 PR #139. The corrected lowering passes GPU readback checks for signed and
 unsigned min/max, zero, equal operands and selected values under Proton.

@@ -26,6 +26,7 @@ profiling from 2026-11-27; they are not controlled benchmarks.
 Earlier RX 7600 reports showed roughly 40% GPU use and 3 GB VRAM occupied.
 Profiling found substantial CPU copying and shared-memory costs, so those
 numbers do not mean the GPU can simply be turned up to reach 20 to 30 fps.
+The next target is a sustained 10 fps in the interactive 3D world.
 Some measurements used a private Wine mapping optimization, so stock Proton
 may perform differently.
 
