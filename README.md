@@ -23,8 +23,9 @@ This is a work in progress. Be clear about what works today:
   `bittersweet plan` inspect the machine and emit an environment file.
 - **Experimental Proton startup is verified.** A Windows-target release
   built on Linux starts under GE-Proton11-12 and renders the account/player
-  prompt and publisher startup logo through vkd3d-proton. The first mission
-  is not verified. The current source ranges pass decompression checks;
+  prompt and publisher startup logo through vkd3d-proton. Subsequent GE-Proton11-14 tests with simple scaling present changing 3D
+  and overlaid credits, at frame times far above the playable target. The
+  first mission is not verified. The current source ranges pass decompression checks;
   the earlier zero-filled source-read failure has not recurred.
 
 The inherited runtime receives attributed shader and texture ports. Recent

@@ -61,6 +61,12 @@ rules; unsupported mapped sections retain copies; bounded title tests show
 no GPU timeout or stale data. Dependencies: task 1. Scope: medium, placement,
 copy policy and tests. Measure paging and copy costs after each change.
 
+The open klbf-lab PR 34 guarded-copy path is ported behind
+`VICTORY_DIRECT_COPY=1`. All 23 focused host tests pass with it enabled
+and disabled. Title runs still show heavy upload and paging costs; the
+copy benchmark does not establish a playable frame rate. File-mapping
+imports must stay disabled after failed coherence checks.
+
 ## 8. Adapt video synchronization from the new source
 
 Acceptance: decoded frames are submitted in order and remain synchronized

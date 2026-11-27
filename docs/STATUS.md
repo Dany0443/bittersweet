@@ -14,7 +14,7 @@ should research current upstream sources when a task depends on them.
 | Host plan | `bittersweet plan` writes cache paths, VRAM budget, wave policy, vendor flags |
 | Setup | `setup.sh` prepares Proton-GE, prefix and `vm.max_map_count`; idempotent |
 | Windows runtime | Windows-target release cross-builds on Linux; account/player prompt rendered under GE-Proton11-12 |
-| First mission | Not verified; world draw submission is reached, but the main presentation plane remains nearly black |
+| First mission | Not verified; simple scaling presents changing 3D and composed credits, but frame times remain far above the target |
 
 Local execution on 2026-11-26 used a Ryzen 5 7600X, Radeon RX 7600 XT,
 Mesa RADV 26.2.7 and the Series S profile. All imports bound, and the
@@ -24,17 +24,28 @@ These observations do not establish mission compatibility or world frame times.
 
 Further tests with GE-Proton11-14 (vkd3d-proton revision
 `v3.1-83-gcae8353ed`) passed the mesh-conversion abort observed with
-GE-Proton11-12. The GPU memory-comparison helper now compiles and passes
-synthetic hardware readback for changed pieces and hash updates. A title
-run used that path and reached world draw submission. A separate run
-selected the main presentation plane and read it back directly: the
-observed world frames remained nearly black, independently of overlay
-composition. A subsequent conservative dimension-query port allows the
-three pixel shaders previously rejected for descriptor-only reads to
-translate and create host pipelines; the image remains nearly black.
-The user reports opening-cutscene audio with no visible scene. Some
-compute programs still fail translation. RAM and swap pressure causes long frame
-times on this 14 GiB host. Neither test verifies the first mission.
+GE-Proton11-12. Explicit root signatures repair the memory-comparison,
+simple-scaling and output-packing helpers under Wine. With
+`VICTORY_FFX_SIMPLE=1`, runs on 2026-11-26 presented changing 3D scenes
+and overlaid credits. The complete console upscaler remains incomplete;
+simple scaling has no temporal reconstruction. Lighting faults remain.
+
+On 2026-11-27 the rebuilt memory probe verified coherent CPU/GPU reads
+and writes for private memory. File-mapping imports opened successfully
+but failed actual data checks. They cannot replace copies on this setup.
+The opt-in guarded in-process copy path passes 23 host tests under Proton
+both enabled and disabled. In an isolated benchmark, 1,000 64 KiB writes
+took 1.09 ms in process versus 24.67 ms through the kernel call. This is
+not an end-to-end frame-rate measurement.
+
+Two bounded title runs reached world draw submission. With in-process
+copies enabled, sampled copy-back time fell to roughly 35 to 43 ms during
+cold world loading, but large uploads, pipeline creation and memory
+pressure still produced multi-second frames. A later sample with no
+pipelines pending remained about 0.9 fps. No sustained title frame-rate
+improvement, player-controlled mission or corrected intro timing is
+established. A fresh window capture was unavailable because the title
+window was unmapped; the earlier visible-scene evidence remains separate.
 
 ## What is missing
 
@@ -53,8 +64,8 @@ times on this 14 GiB host. Neither test verifies the first mission.
    the calling thread; large traversal programs need one latch per loop and
    a larger worker stack.
 5. **World rendering and input validation.** Startup runs under Proton, but
-   mission loading, world rendering, memory pressure and sustained input
-   still need end-to-end verification.
+   mission loading, sustained world rendering, memory pressure and player
+   input still need end-to-end verification.
 
 ## Ported here
 
