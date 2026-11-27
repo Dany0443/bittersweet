@@ -75,6 +75,7 @@ pub fn translation_fingerprint() -> &'static [u8; 32] {
                     "VICTORY_F16_NEAREST",
                     "VICTORY_HOST_WAVE",
                     "VICTORY_PS_HALVES",
+                    "VICTORY_STRUCTURED_LOOP_LIMIT",
                     "VICTORY_DENORM",
                     "VICTORY_NAN_GUARD",
                 ] {

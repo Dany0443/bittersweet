@@ -317,8 +317,101 @@ struct Lower<'a> {
     /// Loop headers' iteration counters (see [`LOOP_LIMIT`]): the phi by
     /// IR block, and its incoming (value, DXIL block) pairs.
     counters: HashMap<usize, (V, Vec<(V, usize)>)>,
+    /// A loop with a separate latch can apply its limit at its normal exit.
+    loop_exits: HashMap<usize, (usize, usize)>,
+    guarded_latches: HashSet<usize>,
     /// The block a loop stopped by [`LOOP_LIMIT`] leaves the program from.
     abort: Option<usize>,
+}
+
+/// Find a loop with a unique unconditional latch and a single branch out.
+/// The exit must dominate the latch, so every iteration checks the limit.
+/// This avoids adding a second destination outside the loop for a timeout.
+fn structured_loop_exit(
+    blocks: &[crate::ir::Block],
+    exits: &[LaneExit],
+    idom: &[usize],
+    rpo: &[usize],
+    header: usize,
+) -> Option<(usize, usize, usize)> {
+    let mut latches = blocks[header]
+        .preds
+        .iter()
+        .copied()
+        .filter(|&b| rpo[b] != usize::MAX && rpo[b] >= rpo[header]);
+    let latch = latches.next()?;
+    if latches.next().is_some() || exits[latch] != LaneExit::Jump(header) {
+        return None;
+    }
+    let mut members = HashSet::from([header]);
+    let mut pending = vec![latch];
+    while let Some(b) = pending.pop() {
+        if members.insert(b) {
+            pending.extend(blocks[b].preds.iter().copied().filter(|&p| rpo[p] != usize::MAX));
+        }
+    }
+    let mut exit = None;
+    for &b in &members {
+        match exits[b] {
+            LaneExit::Jump(to) if members.contains(&to) => {}
+            LaneExit::Branch { taken, not_taken, .. } => {
+                let stay = match (members.contains(&taken), members.contains(&not_taken)) {
+                    (true, true) => continue,
+                    (true, false) => taken,
+                    (false, true) => not_taken,
+                    (false, false) => return None,
+                };
+                if rpo[taken] <= rpo[b] || rpo[not_taken] <= rpo[b] {
+                    return None;
+                }
+                if exit.replace((b, stay)).is_some() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    let (branch, stay) = exit?;
+    let mut b = latch;
+    while b != header && b != branch {
+        let parent = *idom.get(b)?;
+        if parent == b {
+            return None;
+        }
+        b = parent;
+    }
+    (b == branch).then_some((branch, stay, latch))
+}
+
+#[test]
+fn structured_limit_requires_an_exit_on_every_iteration() {
+    use crate::ir::{Block, Exit};
+    let block = |preds, exit| Block {
+        offset: 0,
+        preds,
+        phis: vec![],
+        insts: vec![],
+        exit,
+    };
+    let blocks = [
+        block(vec![], Exit::Jump(1)),
+        block(vec![0, 3], Exit::Jump(2)),
+        block(vec![1], Exit::Branch { taken: 3, not_taken: 4 }),
+        block(vec![2], Exit::Jump(1)),
+        block(vec![2], Exit::End),
+    ];
+    let mut exits = [
+        LaneExit::Jump(1),
+        LaneExit::Jump(2),
+        LaneExit::Branch { when: Bool::TRUE, taken: 3, not_taken: 4 },
+        LaneExit::Jump(1),
+        LaneExit::End,
+    ];
+    let idom = [0, 0, 1, 2, 2];
+    let rpo = [0, 1, 2, 4, 3];
+    assert_eq!(structured_loop_exit(&blocks, &exits, &idom, &rpo, 1), Some((2, 3, 3)));
+    exits[1] = LaneExit::Branch { when: Bool::TRUE, taken: 2, not_taken: 4 };
+    assert_eq!(structured_loop_exit(&blocks, &exits, &idom, &rpo, 1), None);
 }
 
 /// Iterations after which a loop is left (per entry into it), unless
@@ -1720,6 +1813,8 @@ impl<'a> Lower<'a> {
             section_out: HashSet::new(),
             code_table: None,
             counters: HashMap::new(),
+            loop_exits: HashMap::new(),
+            guarded_latches: HashSet::new(),
             abort: None,
         }
     }
@@ -2318,6 +2413,22 @@ impl<'a> Lower<'a> {
                 let blk = self.block[b].expect("reachable");
                 let phi = self.s.m.phi(blk, self.s.t.i32);
                 self.counters.insert(b, (phi, Vec::new()));
+            }
+        }
+        if matches!(self.x.native.stage, HwStage::Ps | HwStage::Cs)
+            && std::env::var_os("VICTORY_STRUCTURED_LOOP_LIMIT").is_some_and(|v| v == "1")
+        {
+            let idom = crate::ir::idoms(&p.blocks, &order, &self.rpo);
+            for &header in &order {
+                if self.counters.contains_key(&header)
+                    && let Some((exit, stay, latch)) =
+                        structured_loop_exit(&p.blocks, &self.x.st.exits, &idom, &self.rpo, header)
+                    && let std::collections::hash_map::Entry::Vacant(slot) =
+                        self.loop_exits.entry(exit)
+                {
+                    slot.insert((header, stay));
+                    self.guarded_latches.insert(latch);
+                }
             }
         }
         self.cur = self.s.entry;
@@ -11870,9 +11981,14 @@ impl<'a> Lower<'a> {
             .map_or(self.x.p.blocks[b].offset, |i| i.machine.offset);
         let term = match self.x.st.exits[b] {
             LaneExit::Jump(t) if self.counters.contains_key(&t) && self.rpo[t] <= self.rpo[b] => {
-                let ok = self.count_iteration(t, pred::IULT);
-                let abort = self.abort_block();
-                Term::CondBr(ok, self.block[t].expect("reachable"), abort)
+                if self.guarded_latches.contains(&b) {
+                    self.advance_loop(t);
+                    Term::Br(self.block[t].expect("reachable"))
+                } else {
+                    let ok = self.count_iteration(t, pred::IULT);
+                    let abort = self.abort_block();
+                    Term::CondBr(ok, self.block[t].expect("reachable"), abort)
+                }
             }
             LaneExit::Jump(t) => {
                 self.enter_loop(t, self.cur);
@@ -11913,6 +12029,16 @@ impl<'a> Lower<'a> {
                 } else if back(self, not_taken) {
                     let stop = self.count_iteration(not_taken, pred::IUGE);
                     self.s.m.bin(self.cur, Bin::Or, cond, stop)
+                } else if let Some(&(header, stay)) = self.loop_exits.get(&b) {
+                    let phi = self.counters[&header].0;
+                    let limit = self.s.m.i32(self.iteration_limit() - 1);
+                    if stay == taken {
+                        let ok = self.s.m.cmp(self.cur, pred::IULT, phi, limit);
+                        self.s.m.bin(self.cur, Bin::And, cond, ok)
+                    } else {
+                        let stop = self.s.m.cmp(self.cur, pred::IUGE, phi, limit);
+                        self.s.m.bin(self.cur, Bin::Or, cond, stop)
+                    }
                 } else {
                     cond
                 };
@@ -11960,12 +12086,25 @@ impl<'a> Lower<'a> {
     /// critical-edge block): the count goes up; the result compares it with
     /// [`LOOP_LIMIT`] by `p` (below: go on; at or above: stop).
     fn count_iteration(&mut self, to: usize, p: u8) -> V {
+        let next = self.advance_loop(to);
+        let limit = self.s.m.i32(self.iteration_limit());
+        let over = self.s.m.cmp(self.cur, p, next, limit);
+        self.s.m.tag(over, Tag::Counter);
+        over
+    }
+
+    fn advance_loop(&mut self, to: usize) -> V {
         let c = self.cur;
         let (phi, _) = self.counters[&to];
         let one = self.s.m.i32(1);
         let next = self.s.m.bin(c, Bin::Add, phi, one);
         self.s.m.tag(phi, Tag::Counter);
         self.s.m.tag(next, Tag::Counter);
+        self.counters.get_mut(&to).expect("header").1.push((next, c));
+        next
+    }
+
+    fn iteration_limit(&self) -> u32 {
         // Per stage unless the switch names one: a loop that never meets its
         // exit (a count read from a buffer the host has not got yet, say)
         // runs to the limit in every lane. A million iterations a pixel
@@ -11977,21 +12116,12 @@ impl<'a> Lower<'a> {
         // 14-25 frames in, in a minimap or shadow mesh draw; with every
         // loop cut at 64 it ran 90 frames. Raise them again once shaders
         // stop reading data that is not there yet.)
-        let limit = match super::loop_limit() {
+        match super::loop_limit() {
             LOOP_LIMIT if self.s.pixel => 1 << 7,
             LOOP_LIMIT if self.s.mesh.is_some() || self.s.threads.is_none() => 1 << 8,
             LOOP_LIMIT => 1 << 12,
             named => named,
-        };
-        let limit = self.s.m.i32(limit);
-        self.counters
-            .get_mut(&to)
-            .expect("header")
-            .1
-            .push((next, c));
-        let over = self.s.m.cmp(c, p, next, limit);
-        self.s.m.tag(over, Tag::Counter);
-        over
+        }
     }
 
     /// The block a lane stopped by [`LOOP_LIMIT`] leaves through.

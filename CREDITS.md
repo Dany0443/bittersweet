@@ -480,6 +480,17 @@ crash log. `VICTORY_PSO_TRACE=1` also logs the start and result of host pipeline
 creation with its cache key and shader labels. These diagnostics were added
 after the RX 5700 runs that ended with code 3 without a crash entry.
 
+### Structured shader loop limits on RDNA 1
+
+Bittersweet applies the iteration limit at a loop's existing exit when a
+single conditional exit dominates the only latch. The RX 5700 trace showed
+that adding a separate return at the latch produced an unstructured exit
+in SPIR-V for a fallback graphics pipeline. With the limit moved to the
+existing exit, the paired pixel shader passed SPIR-V validation and the
+pipeline compiled on RADV. The same rule also let a compute pipeline at
+the world handover compile. The Linux host plan enables this only for
+RDNA 1.
+
 ### Movie-plane upload ownership
 
 Adapted the per-list CPU movie-plane upload technique from

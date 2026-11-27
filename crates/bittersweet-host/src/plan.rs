@@ -209,6 +209,9 @@ pub fn build(profile: &HostReport, cache_root: &Path, proton: bool) -> TuningPla
     );
     // Ray tracing is an experiment on every tracked build in the table.
     put!("BITTERSWEET_ENABLE_RT", "0");
+    if profile.amd_family == AmdFamily::Rdna1 && !mesh_safe {
+        put!("VICTORY_STRUCTURED_LOOP_LIMIT", "1");
+    }
 
     // A card whose texture budget is well below its own size loses time to
     // eviction and long waits. These are the settings the 8 GB port
@@ -417,6 +420,7 @@ mod tests {
                     .map(|(_, v)| v.as_str())
             };
             assert_eq!(get("BITTERSWEET_MESH_PIPELINES"), Some(mesh));
+            assert_eq!(get("VICTORY_STRUCTURED_LOOP_LIMIT"), (device == 0x731f).then_some("1"));
             assert_eq!(get("BITTERSWEET_WAVE64"), Some("native"));
             assert_eq!(get("MESA_SHADER_CACHE_MAX_SIZE"), Some("12G"));
             assert_eq!(get("AMD_VULKAN_ICD"), Some("RADV"));
