@@ -85,6 +85,10 @@ pub(crate) struct Parts<'a> {
     pub prims: Vec<SigElement>,
     /// Mesh: what the group id arrives multiplied by.
     pub mesh_stride: u32,
+    /// Mesh: emit a compute shader that writes the outputs to the mesh
+    /// output UAVs ([`super::MeshLayout`]) instead of a mesh shader.
+    #[allow(dead_code)]
+    pub mesh_as_compute: bool,
 }
 
 enum Stop {
@@ -12140,6 +12144,7 @@ mod tests {
             outputs: vec![],
             prims: vec![],
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
     }
 
@@ -12395,6 +12400,7 @@ mod tests {
             outputs: vec![],
             prims: vec![],
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
         .map(|_| ())
     }
@@ -12478,6 +12484,7 @@ mod tests {
             outputs: vec![],
             prims: vec![],
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
     }
 
@@ -12601,6 +12608,7 @@ mod tests {
             outputs: vec![],
             prims: vec![],
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
         .unwrap();
 

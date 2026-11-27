@@ -387,6 +387,17 @@ refused with a named reason rather than failing pipeline creation.
 offline translation. The capability is part of the shader cache
 fingerprint.
 
+## RDNA 1 mesh-as-compute fallback infrastructure
+
+The `mesh_as_compute` capability gate and its plumbing through the shader
+translator (`crates/victory-shader/src/emit/lower.rs`,
+`crates/victory-shader/src/emit/mod.rs`) follow the RDNA 1 hybrid work
+in `frojo2211-ctrl/VIctory-RDNA1-Hybrid`, snapshot
+`62cd92a73049ea4188b9f501121fc2f116cdda79`. The full compute-shader
+fallback for mesh shaders on RDNA 1 (gfx10.1) hardware is not yet
+implemented; the infrastructure enables future work without regressing
+RDNA 2+ or NVIDIA paths.
+
 ## Experimental Wine mapping server
 
 The private Linux runtime experiment uses the mapping view-tree patch from

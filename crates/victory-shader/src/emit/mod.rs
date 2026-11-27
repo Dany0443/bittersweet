@@ -654,6 +654,7 @@ fn emit_program(
         outputs,
         prims,
         mesh_stride,
+        mesh_as_compute: false,
     })?;
     let wave_size = l.wave_size;
     let shader = HostShader {
@@ -1533,6 +1534,7 @@ mod tests {
             outputs: Vec::new(),
             prims: Vec::new(),
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
         .unwrap();
         #[allow(unused_mut)]

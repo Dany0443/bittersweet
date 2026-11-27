@@ -325,6 +325,7 @@ fn lower_words(words: Vec<u32>, threads: u32, lds_bytes: u32, rsrc2: u32) -> Hos
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+            mesh_as_compute: false,
     })
     .expect("lower");
 
@@ -1887,6 +1888,7 @@ fn whole_wave_f64_sum_and_cvt_f32_f64() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+            mesh_as_compute: false,
     })
     .expect("lower");
 
@@ -2084,6 +2086,7 @@ fn glc_heap_uav_loads_stores_and_atomics_execute_on_gpu() {
         outputs: Vec::new(),
         prims: Vec::new(),
         mesh_stride: 0,
+            mesh_as_compute: false,
     })
     .expect("lower");
 

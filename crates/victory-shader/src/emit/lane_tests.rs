@@ -58,6 +58,7 @@ mod dpp_fi_tests {
             outputs: vec![],
             prims: vec![],
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
         .expect("lower")
     }
@@ -109,6 +110,7 @@ mod swizzle_exec_tests {
             outputs: vec![],
             prims: vec![],
             mesh_stride: 0,
+            mesh_as_compute: false,
         })
         .expect("lower")
     }
