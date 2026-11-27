@@ -40,7 +40,8 @@ sustained frame rate unverified.
 
 With `VICTORY_RAY_MISS_ONLY=1`, the RX 7600 reached the 3D world at
 1.2 and 2.3 fps in two samples. Those samples issued 994 and 1,276 draws
-per frame and dropped 1,365 and 982 draws for missing pipelines. The run
+per frame. Almost all of the 1,365 and 982 dropped operations per frame
+were stages of the disabled ray-tracing structure builder. The run
 ended at its 155-second limit with no logged GPU fault. Available RAM
 fell as low as 952 MiB, and free swap reached zero. The trial did not
 establish a speedup or verify world material appearance. The mode stays
@@ -56,6 +57,24 @@ and loading screens at about 30 fps. The title also produced audio in its
 PipeWire stream at startup. The memory monitor stopped the run during
 world loading with 657 MiB of available RAM and no free swap, before any
 world performance sample could be measured.
+
+With window reuse enabled on the same warmed build, a separate trial
+reached 3.5 fps at 501 draws and 1.7 fps at 1,710 draws. The cache reported
+2,048 reused range lookups representing 176 MiB of avoided duplicate
+windows. The memory monitor stopped the trial after 71 seconds with
+942 MiB of available RAM and no free swap. Starting memory and input timing
+differed from the preceding trial, so the results cannot isolate a change
+in frame time or prove that the memory savings persist in gameplay.
+
+The Proton xmem suite passed 11 tests with the DirectStorage page-view
+notifications, including a write that spans two pages and reaches two
+views of the same page. The warmed RX 7600 build reached the first 3D
+cutscene, with world samples from 1.5 to 3.2 fps and up to 4,254 draws per
+frame. A captured frame showed character silhouettes and highlights, with
+materials still very dark. The monitor stopped the run after 83 seconds
+with 754 MiB of available RAM and no free swap. Starting free swap was
+higher than in the preceding trial. The run leaves any texture or
+performance improvement unverified.
 
 The RX 7600 reproduces the scalar min/max SCC error addressed by DexNom
 PR #139. The corrected lowering passes GPU readback checks for signed and
