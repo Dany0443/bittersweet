@@ -35,6 +35,24 @@ title run reached the account picker, then exited after 86 seconds before
 producing a world sample. Neither a memory stop nor a GPU fault was logged.
 The runtime savings remain unmeasured.
 
+Two further runs used the same warmed executable and scripted input. With
+the shortcut enabled, 6,553 of 7,021 and 8,781 of 9,341 write-watch lookups
+per frame used armed guards in the two world samples. Write-watch work took
+18.6 and 23.2 ms in those samples. The median world rates were 2.6 fps with
+the shortcut off and 3.2 fps with it on. The memory monitor ended both runs,
+and the enabled run began with less free swap and produced only two world
+samples. That confirms the kernel calls were avoided and leaves the FPS
+effect uncertain.
+
+A 960 by 540 internal resolution trial produced a median of 3.15 fps over
+16 world samples. The user reported worse textures and objects. Restoring
+1280 by 720 with the same executable and settings gave a median of 2.9 fps
+over seven samples. Characters still appeared dark, and the indexed texture
+queue reported zero uploads with about 30,000 slots waiting in late samples.
+The monitor ended the restored-resolution run after 105 seconds under memory
+pressure. The cutscene coverage and starting memory differed between the runs.
+Keep the original scale while investigating texture residency and lighting.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
