@@ -1968,6 +1968,17 @@ unsafe impl Send for MeshScratch {}
 static SPARE_MESH: Mutex<Spare<MeshScratch>> = Mutex::new(Spare::new());
 const SPARE_MESH_MAX: u64 = 64 << 20;
 
+struct TransferUpload {
+    buffer: ID3D12Resource,
+    data: usize,
+}
+
+// SAFETY: a D3D12 resource and its mapping, used only by the list that owns it.
+unsafe impl Send for TransferUpload {}
+
+static SPARE_TRANSFERS: Mutex<Spare<TransferUpload>> = Mutex::new(Spare::new());
+const SPARE_TRANSFER_MAX: u64 = 16 << 20;
+
 /// A scratch chunk of `size` bytes: one kept ([`SPARE`]) or a new one.
 fn take_chunk(host: &Host, size: u64) -> Option<Chunk> {
     if scratch_pool()
@@ -2265,7 +2276,8 @@ struct Deferred {
     /// Destination, source, bytes.
     copies: Vec<Step>,
     uploads: Vec<ID3D12Resource>,
-    /// The bytes of `uploads` (counted in [`ALIVE`] while they are held).
+    transfers: Vec<(TransferUpload, u64)>,
+    /// Bytes of uploads and transfers held by this list.
     upload_bytes: u64,
     /// Host objects the list's commands name (pipelines, root signatures,
     /// descriptor heaps): the title may release its objects before it
@@ -2303,7 +2315,10 @@ impl Deferred {
 
 impl Drop for Deferred {
     fn drop(&mut self) {
-        ALIVE[6].fetch_sub(self.uploads.len() as u64, Ordering::Relaxed);
+        ALIVE[6].fetch_sub(
+            (self.uploads.len() + self.transfers.len()) as u64,
+            Ordering::Relaxed,
+        );
         ALIVE[7].fetch_sub(self.upload_bytes, Ordering::Relaxed);
     }
 }
@@ -5546,7 +5561,13 @@ impl HostList {
         #[cfg(feature = "diagnostics")]
         let started = std::time::Instant::now();
         self._alive.used();
-        *self.deferred() = Deferred::default();
+        let transfers = {
+            let mut deferred = self.deferred();
+            let transfers = std::mem::take(&mut deferred.transfers);
+            ALIVE[6].fetch_sub(transfers.len() as u64, Ordering::Relaxed);
+            *deferred = Deferred::default();
+            transfers
+        };
         self.states
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -5579,6 +5600,13 @@ impl HostList {
         };
         if let Err(e) = reset {
             fail(format_args!("a host command list did not reset ({e})"));
+        }
+        for (upload, size) in transfers {
+            let excess = SPARE_TRANSFERS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .give(upload, size, SPARE_TRANSFER_MAX);
+            drop(excess);
         }
         if prelude_pool() {
             let prelude = self
@@ -6034,6 +6062,7 @@ impl HostList {
             }
             if !(deferred.copies.is_empty()
                 && deferred.uploads.is_empty()
+                && deferred.transfers.is_empty()
                 && deferred.kept.is_empty()
                 && deferred.textures.is_empty()
                 && deferred.writes.is_empty()
@@ -6153,13 +6182,30 @@ impl HostList {
 
     /// A mapped upload buffer of `size` bytes, alive until the list is
     /// reset.
-    ///
-    /// shortcut: one buffer per copy; pool them once uploads are frequent.
     pub(crate) fn upload(&self, host: &Host, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
-        let (buffer, data) = host.upload_buffer(size)?;
-        name(&buffer, || format!("list upload {size:#x}"));
-        self.deferred().hold_upload(buffer.clone(), size);
-        Some((buffer, data))
+        let size = size.max(1).checked_next_multiple_of(64 << 10)?;
+        let spare = SPARE_TRANSFERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take(size);
+        let upload = match spare {
+            Some(upload) => upload,
+            None => {
+                let (buffer, data) = host.upload_buffer(size)?;
+                name(&buffer, || format!("list upload {size:#x}"));
+                TransferUpload {
+                    buffer,
+                    data: data as usize,
+                }
+            }
+        };
+        let result = (upload.buffer.clone(), upload.data as *mut u8);
+        let mut deferred = self.deferred();
+        deferred.transfers.push((upload, size));
+        deferred.upload_bytes += size;
+        ALIVE[6].fetch_add(1, Ordering::Relaxed);
+        ALIVE[7].fetch_add(size, Ordering::Relaxed);
+        Some(result)
     }
 
     /// `len` bytes of upload memory (256-byte aligned) until the list is
@@ -8551,6 +8597,26 @@ mod spare {
             list.prelude.lock().unwrap().is_none(),
             super::prelude_pool()
         );
+    }
+
+    #[test]
+    fn transfer_uploads_are_distinct_until_the_list_resets() {
+        let Some(host) = host() else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        let first = host.new_list().unwrap();
+        let second = host.new_list().unwrap();
+        let (a, _) = first.upload(host, 5100).unwrap();
+        let (b, _) = second.upload(host, 5100).unwrap();
+        assert_ne!(a.as_raw(), b.as_raw());
+        let a_address = a.as_raw();
+        drop(a);
+        first.close();
+        host.execute(&[&first]);
+        first.reset();
+        let (reused, _) = first.upload(host, 6100).unwrap();
+        assert_eq!(reused.as_raw(), a_address);
     }
 
     #[test]

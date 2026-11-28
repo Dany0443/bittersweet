@@ -46,6 +46,8 @@ descriptors.
 
 State-transition command lists and their allocators go back to a bounded
 shared pool when the owning list resets after GPU completion.
+Movie planes and texture copies reuse dedicated upload buffers after the
+same reset. The transfer pool retains at most 16 MiB of idle buffers.
 
 The optional GPU upload path applies to texture staging and command-list
 scratch. It checks D3D12 upload heap support and the local memory budget

@@ -2808,10 +2808,10 @@ mod tests {
                 RowPitch: 256,
             },
         };
+        let commands = host.new_list().unwrap();
         for value in [0x11u8, 0x11, 0x11, 0x77, 0x33, 0x99] {
             // SAFETY: private synthetic texture memory, idle between submissions.
             unsafe { std::ptr::write_bytes(memory.cast_mut(), value, bytes) };
-            let commands = host.new_list().unwrap();
             crate::texture::upload_from(&commands, image, texture, 0);
             crate::list::ensure_state(&commands, image, 0x800);
             let to = D3D12_TEXTURE_COPY_LOCATION {
@@ -2845,6 +2845,7 @@ mod tests {
                 }
                 back.Unmap(0, None);
             }
+            commands.reset();
         }
         object::release(image);
     }
