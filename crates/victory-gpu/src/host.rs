@@ -1858,6 +1858,25 @@ impl Drop for Counted {
     }
 }
 
+/// Ordered batches in which no list is recorded twice.
+fn unique_batches<T>(items: &[&T]) -> Vec<std::ops::Range<usize>> {
+    let mut batches = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut start = 0;
+    for (index, item) in items.iter().enumerate() {
+        if !seen.insert(std::ptr::from_ref(*item)) {
+            batches.push(start..index);
+            start = index;
+            seen.clear();
+            seen.insert(std::ptr::from_ref(*item));
+        }
+    }
+    if start < items.len() {
+        batches.push(start..items.len());
+    }
+    batches
+}
+
 /// A chunk of upload memory for lists' scratch data: the buffer, its
 /// mapping and its host GPU address.
 struct Chunk {
@@ -4593,7 +4612,9 @@ impl Host {
     /// Runs closed lists and waits for them, and with [`late`] for
     /// everything sent to the card before them, which is settled first.
     pub(crate) fn execute(&self, runs: &[&HostList]) {
-        let _ = self.submit(runs, false);
+        for range in unique_batches(runs) {
+            let _ = self.submit(&runs[range], false);
+        }
     }
 
     /// A queue's submission with [`late`]: the host lists `lists`, taken
@@ -4604,6 +4625,12 @@ impl Host {
     /// for reuse then, as a queue does for the lists it ran.
     pub(crate) fn execute_late(&self, lists: Vec<crate::list::Detached>, order: Vec<usize>) {
         if order.is_empty() {
+            crate::list::recycle(lists, &order);
+            return;
+        }
+        let runs: Vec<&HostList> = order.iter().map(|&i| lists[i].host()).collect();
+        if unique_batches(&runs).len() > 1 {
+            self.execute(&runs);
             crate::list::recycle(lists, &order);
             return;
         }
@@ -8415,6 +8442,14 @@ mod trail {
 mod spare {
     use super::{BUFFER_WRITE, Spare, host};
     use windows::core::Interface;
+
+    #[test]
+    fn repeated_lists_preserve_order_across_batches() {
+        let (a, b, c) = (1, 2, 3);
+        assert_eq!(super::unique_batches(&[&a, &b, &a, &c, &b]), [0..2, 2..5]);
+        assert!(super::unique_batches::<u32>(&[]).is_empty());
+        assert_eq!(super::unique_batches(&[&a, &a, &a]), [0..1, 1..2, 2..3]);
+    }
 
     /// Kept things come back by size, the last given first, and nothing is
     /// kept past the limit.
