@@ -2303,6 +2303,8 @@ struct Deferred {
     /// descriptor heaps): the title may release its objects before it
     /// submits the list.
     kept: Vec<windows::core::IUnknown>,
+    /// Mesh fallback objects already held by this list.
+    mesh_kept: std::collections::HashSet<usize>,
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
     refreshed: std::collections::HashSet<(usize, usize, usize)>,
@@ -6327,6 +6329,19 @@ impl HostList {
         }
     }
 
+    /// Keep an object once for the mesh fallback's repeated dispatches.
+    pub(crate) fn keep_mesh(&self, object: &impl Interface) {
+        let mut deferred = self.deferred();
+        let key = object.as_raw() as usize;
+        if deferred.mesh_kept.insert(key) {
+            if let Ok(object) = object.cast::<windows::core::IUnknown>() {
+                deferred.kept.push(object);
+            } else {
+                deferred.mesh_kept.remove(&key);
+            }
+        }
+    }
+
     /// Whether this is the first time since the reset that the list asks
     /// about `key` (a texture to bring up to date).
     pub(crate) fn first_use(&self, key: usize) -> bool {
@@ -8547,6 +8562,24 @@ mod spare {
         second.close();
         host.execute(&[&second]);
         eprintln!("mesh scratch reused on a second submitted D3D12 list");
+    }
+
+    #[test]
+    fn mesh_keeps_each_object_until_list_reset() {
+        let Some(host) = host() else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        let list = host.new_list().unwrap();
+        let buffer = host.uav_buffer(65536).unwrap();
+        let before = super::references(&buffer);
+        list.keep_mesh(&buffer);
+        list.keep_mesh(&buffer);
+        assert_eq!(super::references(&buffer), before + 1);
+        list.close();
+        host.execute(&[&list]);
+        list.reset();
+        assert_eq!(super::references(&buffer), before);
     }
 }
 

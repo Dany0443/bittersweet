@@ -2158,8 +2158,8 @@ impl State {
             return false;
         }
         let Some(buffer) = list.mesh_scratch(size) else { return false };
-        list.keep(&buffer);
-        list.keep(&fallback.compute);
+        list.keep_mesh(&buffer);
+        list.keep_mesh(&fallback.compute);
         list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
         let base = unsafe { buffer.GetGPUVirtualAddress() };
@@ -2951,11 +2951,11 @@ impl State {
         // The mesh converter overwrites the same scratch used by the
         // ordinary argument clamp, invalidating any cached records.
         self.window = None;
-        list.keep(&data);
-        list.keep(&commands);
-        list.keep(&fallback.compute);
-        list.keep(&signatures.compute);
-        list.keep(&signatures.draw);
+        list.keep_mesh(&data);
+        list.keep_mesh(&commands);
+        list.keep_mesh(&fallback.compute);
+        list.keep_mesh(&signatures.compute);
+        list.keep_mesh(&signatures.draw);
         let data_gpu = unsafe { data.GetGPUVirtualAddress() };
         let command_gpu = unsafe { commands.GetGPUVirtualAddress() };
         list.begin_command();
