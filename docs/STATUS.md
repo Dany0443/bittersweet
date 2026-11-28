@@ -4,7 +4,17 @@ This page records the current, locally verified state of the Linux/Proton
 effort. External project status is not tracked in this repository; agents
 should research current upstream sources when a task depends on them.
 
-## Latest validation: 2026-11-27
+## Latest validation: 2026-11-28
+
+With `VICTORY_AMBIENT=1` and the ray-tracing structure builder off, the
+warmed RX 7600 build applied the fallback and reached the planned
+155-second timeout without a logged GPU fault or memory stop. The median
+was 2.9 fps across 17 world samples, with up to 5,883 draws per frame. A
+late indoor frame showed Lucia's face and hair. Other frames were dark or
+washed out. This trial had more free swap at launch than earlier runs and
+did not isolate the fallback's visual or performance effect.
+
+## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
 changing frames from 219 through 269 seconds. Several late world samples
