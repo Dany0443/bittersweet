@@ -113,6 +113,13 @@ Proton GPU readback verified movie-plane and texture copies. The pooled
 run reached the first 1280 by 720 upscale, then the memory monitor ended
 it after 62 seconds with no free swap, before a world frame-rate sample.
 
+With early texture staging enabled, a warmed run uploaded 112 indexed
+slots (13 MB) by a 30 fps loading-stage sample, without an indexed buffer
+sweep at that point. It reached 1,095 indexed uploads (102 MB) in later
+loading samples. The game exited after 60 seconds with no free swap,
+before the first 3D upscale and without a logged GPU fault. The run
+verified earlier uploads. World rendering and frame rate remain unverified.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
