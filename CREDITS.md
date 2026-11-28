@@ -523,6 +523,8 @@ Mesh fallback lists retain each scratch buffer and command signature once
 until reset, avoiding repeated references during indirect draws.
 Lists on hosts without mesh shaders also avoid repeated buffer refreshes
 already covered by earlier ranges. This change was developed locally.
+The compute fallback avoids a first-lane read of the workgroup-uniform mesh
+group input. This local optimization keeps native mesh translation unchanged.
 
 The compute fallback retains its declared output layout even when native
 mesh output limits would require smaller counts. This local fix follows

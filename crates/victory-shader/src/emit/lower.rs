@@ -78,6 +78,23 @@ const MESH_VERTICES: u8 = 0;
 const MESH_INDICES: u8 = 1;
 const MESH_PRIMITIVES: u8 = 2;
 
+/// A mesh group's original v5 is the same in every compute lane. Keep the
+/// general wave operation for guarded reads and all other input values.
+pub(super) fn mesh_group_read_is_uniform(
+    mesh_as_compute: bool,
+    guarded: bool,
+    value: Option<Value>,
+    io: &Io,
+) -> bool {
+    mesh_as_compute
+        && !guarded
+        && value.is_some_and(|value| {
+            io.inputs
+                .iter()
+                .any(|&(input, kind)| input == value && kind == Input::MeshGroup)
+        })
+}
+
 pub(crate) struct Parts<'a> {
     pub native: &'a NativeProgram,
     pub p: &'a Program,
@@ -8380,6 +8397,23 @@ impl<'a> Lower<'a> {
                 let is = self.s.m.cmp(c, pred::EQ, me, lane);
                 let r = self.s.m.select(c, is, a, old);
                 int(self, r)
+            }
+            "v_readfirstlane_b32"
+                if v.dpp.is_none()
+                    && v.sdwa.is_none()
+                    && mesh_group_read_is_uniform(
+                        self.x.mesh_as_compute,
+                        guard.is_some(),
+                        match v.src.first() {
+                            Some(&Operand::Vector { reg, .. }) => inst.read(Reg::V(reg)),
+                            _ => None,
+                        },
+                        self.x.io,
+                    ) =>
+            {
+                // The workgroup ID and stride are identical in every lane.
+                let a = s(self, 0)?;
+                int(self, a)
             }
             "v_readfirstlane_b32"
                 if inst
