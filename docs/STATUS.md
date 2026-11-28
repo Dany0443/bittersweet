@@ -120,6 +120,24 @@ loading samples. The game exited after 60 seconds with no free swap,
 before the first 3D upscale and without a logged GPU fault. The run
 verified earlier uploads. World rendering and frame rate remain unverified.
 
+Two more warmed RX 7600 runs disabled early texture staging. With the
+default DirectStorage file mode, the monitor stopped the run after
+59 seconds with 389 MiB of available RAM and no free swap. The run with
+`VICTORY_DSTORAGE_IO=direct` exited with status 1 after 42 seconds, also
+with no free swap. They began with about 864 and 67 MiB of free swap,
+respectively. Neither produced a world frame-rate sample, so the runs
+leave the effect of direct I/O unresolved.
+
+Shortly before the direct I/O run exited, Linux process mappings accounted
+for about 2,237 MiB of anonymous memory and 1,388 MiB of memory-backed
+file mappings at console addresses. The same sample showed about 351 MiB
+of anonymous memory at host addresses. These figures are proportional
+resident sizes for the title process. In the default file mode, the last
+loading snapshot counted 180 MiB of GPU buffer shadows and 17 MiB of
+texture staging. Both runs exhausted swap while VRAM use was still below
+2.3 GiB in the samples. The abrupt exit in the direct I/O run remains
+unexplained.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
