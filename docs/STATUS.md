@@ -99,6 +99,13 @@ less free swap and exited during world loading after 46 seconds with
 no world sample. Neither logged a GPU fault. These runs establish that
 the new path is used, but leave its gameplay impact unmeasured.
 
+The advance write-watch filter passed 12 Proton tests, including guard
+coverage, writes and remapping. A warmed RX 7600 run started with 562 MiB
+of free swap and exited during world loading after 42 seconds. Swap
+reached zero. No world sample or GPU fault was logged, and the loading
+samples did not exercise the new filter. Its frame-time effect remains
+unmeasured.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
