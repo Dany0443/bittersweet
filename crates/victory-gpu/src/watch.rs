@@ -152,11 +152,35 @@ const AHEAD_MAX: usize = (1 << 30) / PAGE;
 /// 456 ms, in run 14). Ranges that are not write-watched, or lie alone, are
 /// left to `writes`.
 pub(crate) fn ask_ahead(ranges: &[(usize, usize)]) {
-    let mut pieces: Vec<(usize, usize)> = ranges
+    ask_ahead_pages(&mut kernel_query_pages(ranges));
+}
+
+fn kernel_query_pages(ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let guarded = guard_fast().then(guards);
+    let pages = select_kernel_pages(ranges, guarded.as_deref());
+    #[cfg(feature = "diagnostics")]
+    if guarded.is_some() {
+        let total = ranges.iter().filter(|&&(a, b)| a < b).count();
+        crate::copystat::add(
+            crate::copystat::C::WatchAheadGuarded,
+            (total - pages.len()) as u64,
+        );
+    }
+    pages
+}
+
+fn select_kernel_pages(ranges: &[(usize, usize)], guarded: Option<&Guards>) -> Vec<(usize, usize)> {
+    ranges
         .iter()
-        .filter(|r| r.0 < r.1)
-        .map(|&(start, end)| (start / PAGE, end.div_ceil(PAGE)))
-        .collect();
+        .filter_map(|&(start, end)| {
+            let first = start / PAGE;
+            (start < end && guarded.is_none_or(|g| !g.protected.contains(&first)))
+                .then(|| (first, end.div_ceil(PAGE)))
+        })
+        .collect()
+}
+
+fn ask_ahead_pages(pieces: &mut [(usize, usize)]) {
     if pieces.len() < 2 {
         return;
     }
@@ -252,7 +276,8 @@ pub(crate) fn ask_once(ranges: &[(usize, usize)]) {
         return;
     }
     ask_once_end();
-    ask_ahead(ranges);
+    let mut pages = kernel_query_pages(ranges);
+    ask_ahead_pages(&mut pages);
     let mut j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
     let j = &mut *j;
     j.asked += 1;
@@ -261,11 +286,7 @@ pub(crate) fn ask_once(ranges: &[(usize, usize)]) {
     // such range asked again at each of its 70 flushes (run 76: 2,300
     // askings a frame with the switch on, as without it). They are asked
     // here, once; what is not write-watched stays with `writes`.
-    for &(start, end) in ranges {
-        if start >= end {
-            continue;
-        }
-        let (first, last) = (start / PAGE, end.div_ceil(PAGE));
+    for (first, last) in pages {
         if !j.ahead.covers(first, last) && ask_kernel(j, first, last) {
             j.ahead.insert(first, last);
         }
@@ -384,11 +405,7 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     }
     #[cfg(feature = "diagnostics")]
     let started = std::time::Instant::now();
-    static FAST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let armed = if guarded
-        && *FAST.get_or_init(|| {
-            std::env::var_os("VICTORY_GUARD_FAST").is_some_and(|v| v == "1") && !ask_guards()
-        }) {
+    let armed = if guarded && guard_fast() {
         timed_guard(|| guards().read_if_armed(first, last))
     } else {
         None
@@ -468,6 +485,13 @@ fn guards() -> std::sync::MutexGuard<'static, Guards> {
 fn ask_guards() -> bool {
     static ASK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ASK.get_or_init(|| std::env::var_os("VICTORY_GUARD_ASK").is_some_and(|v| v == "1"))
+}
+
+fn guard_fast() -> bool {
+    static FAST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FAST.get_or_init(|| {
+        std::env::var_os("VICTORY_GUARD_FAST").is_some_and(|v| v == "1") && !ask_guards()
+    })
 }
 
 fn timed_guard(read: impl FnOnce() -> Option<Vec<usize>>) -> Option<Vec<usize>> {
@@ -987,6 +1011,31 @@ mod tests {
         MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
     };
     const MEM_WRITE_WATCH: u32 = 0x20_0000;
+
+    #[test]
+    fn ahead_queries_leave_armed_views_for_the_guard_path() {
+        let mut guarded = Guards {
+            protected: BTreeSet::from([2]),
+            clean: BTreeSet::new(),
+            absent: BTreeSet::from([3]),
+        };
+        let ranges = [
+            (2 * PAGE + 4, 3 * PAGE),
+            (3 * PAGE, 3 * PAGE + 4),
+            (5 * PAGE, 6 * PAGE),
+            (6 * PAGE, 6 * PAGE),
+        ];
+        assert_eq!(select_kernel_pages(&ranges, None), [(2, 3), (3, 4), (5, 6)]);
+        assert_eq!(
+            select_kernel_pages(&ranges, Some(&guarded)),
+            [(3, 4), (5, 6)]
+        );
+        guarded.protected.remove(&2);
+        assert_eq!(
+            select_kernel_pages(&ranges, Some(&guarded)),
+            [(2, 3), (3, 4), (5, 6)]
+        );
+    }
 
     #[test]
     fn a_guarded_query_reuses_only_armed_views() {

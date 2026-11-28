@@ -63,6 +63,10 @@ DirectStorage physical-page writes look up every mapped view of the
 destination pages. They open the write guards before decoding or copying
 and publish the changed view ranges when the write window closes.
 
+With the guard shortcut enabled, advance kernel queries omit ranges
+that start in an armed view. The refresh still checks the current guard
+state and falls back to the kernel if the view has been remapped.
+
 The optional screen-probe fallback clears the matching resolve's packed
 indirect-light UAV after its dispatch. Ordered D3D12 barriers surround the
 clear. The title's later lighting pass still samples its own materials.

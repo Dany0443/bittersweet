@@ -117,8 +117,8 @@ With the ray-tracing structure builder off, `VICTORY_AMBIENT=1` tests a
 constant indirect light after the screen-probe resolve. It is meant for
 dark scenes and can flatten lighting.
 
-`VICTORY_GUARD_FAST=1` tests a shorter write-watch path for mapped buffers
-already protected by the runtime.
+`VICTORY_GUARD_FAST=1` tests a shorter write-watch path and skips advance
+kernel queries for mapped buffers already protected by the runtime.
 
 The renderer shares completed state-transition command lists. Set
 `VICTORY_PRELUDE_POOL=0` to compare against per-list allocation.

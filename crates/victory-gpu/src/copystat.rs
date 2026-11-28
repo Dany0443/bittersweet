@@ -128,8 +128,9 @@ pub(crate) enum C {
     WaitsForBuffers,
     IndirectBounded,
     WatchKnownViews,
+    WatchAheadGuarded,
 }
-const COUNTERS: usize = C::WatchKnownViews as usize + 1;
+const COUNTERS: usize = C::WatchAheadGuarded as usize + 1;
 static COUNT: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
 
 pub(crate) fn add(c: C, n: u64) {
@@ -1059,7 +1060,7 @@ pub(crate) fn log(frames: f64) {
     tracing::info!(
         "copies per frame: {:.1} submissions; {:.0} title copies {:.1} MB; {:.0} refreshes {:.1} MB, \
          {:.0} skipped {:.1} MB; {:.0} runs {:.1} ms; {:.0} queries {:.2} ms, moves {:.2} ms, \
-         {:.2} MB unmapped; {:.0} page faults; {:.0} watches {:.2} ms ({:.0} used armed guards), {:.1} MB checked, {:.1} MB \
+         {:.2} MB unmapped; {:.0} page faults; {:.0} watches {:.2} ms ({:.0} used armed guards, {:.0} ahead ranges filtered), {:.1} MB checked, {:.1} MB \
          unchanged; {:.1} fallbacks; {:.0} guard faults; textures {:.1} MB watched and \
          changed, {:.1} MB hashed, {:.1} MB of them changed",
         c[C::Submissions as usize],
@@ -1079,6 +1080,7 @@ pub(crate) fn log(frames: f64) {
         c[C::Watches as usize],
         ms(c[C::WatchUs as usize]),
         c[C::WatchKnownViews as usize],
+        c[C::WatchAheadGuarded as usize],
         mb(c[C::Checked as usize]),
         mb(c[C::Unchanged as usize]),
         c[C::Fallbacks as usize],
