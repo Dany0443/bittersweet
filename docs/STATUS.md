@@ -106,6 +106,13 @@ reached zero. No world sample or GPU fault was logged, and the loading
 samples did not exercise the new filter. Its frame-time effect remains
 unmeasured.
 
+The transfer upload pool reduced cumulative startup allocations from
+1,395 buffers (5,556 MB) to 24 buffers (89 MB) before the first
+upscale in comparable runs. These totals count allocations over time.
+Proton GPU readback verified movie-plane and texture copies. The pooled
+run reached the first 1280 by 720 upscale, then the memory monitor ended
+it after 62 seconds with no free swap, before a world frame-rate sample.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
