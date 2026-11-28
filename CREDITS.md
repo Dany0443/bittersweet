@@ -504,6 +504,9 @@ The conversion, dispatch and draw each advance buffer state tracking at
 their command boundaries. A compiler-only regression test exercises Wine's
 HLSL compiler without creating a GPU device.
 
+Mesh fallback recording-time profiling was added locally to measure direct
+and indirect command preparation on the Linux host.
+
 ### Mesh fallback register spaces
 
 Adapted the separate compute binding spaces from Marvisak/VIctory

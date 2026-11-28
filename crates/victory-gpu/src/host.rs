@@ -7595,6 +7595,17 @@ impl Meter {
         tracing::info!(
             "indirect mesh dispatches: the largest group count asked for {mesh_largest} (run: at most 65535), {mesh_groups:.0} groups asked per frame"
         );
+        let [direct, direct_ns, indirect_count, indirect_ns] = crate::draw::take_mesh_profile();
+        if direct + indirect_count > 0 {
+            tracing::info!(
+                direct_calls = direct,
+                direct_cpu_ms = direct_ns as f64 / 1e6,
+                indirect_calls = indirect_count,
+                indirect_cpu_ms = indirect_ns as f64 / 1e6,
+                frames,
+                "mesh fallback CPU recording time"
+            );
+        }
         late_line(frames);
         card_clock_line(frames, ms);
         crate::shadow::back_line(frames);

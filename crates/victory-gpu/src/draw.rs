@@ -24,6 +24,41 @@ use crate::host::HostList;
 use crate::object::This;
 use crate::pipeline::host::HostPipeline;
 
+// Optional CPU recording-time measurements for the emulated mesh path.
+static MESH_PROFILE: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+struct MeshProfile {
+    started: Option<std::time::Instant>,
+    index: usize,
+}
+
+impl MeshProfile {
+    fn start(index: usize) -> Self {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let enabled = *ENABLED.get_or_init(|| {
+            std::env::var_os("VICTORY_MESH_PROFILE").is_some_and(|v| v == "1")
+        });
+        Self {
+            started: enabled.then(std::time::Instant::now),
+            index,
+        }
+    }
+}
+
+impl Drop for MeshProfile {
+    fn drop(&mut self) {
+        if let Some(started) = self.started {
+            MESH_PROFILE[self.index].fetch_add(1, Ordering::Relaxed);
+            MESH_PROFILE[self.index + 1]
+                .fetch_add(started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64, Ordering::Relaxed);
+        }
+    }
+}
+
+pub(crate) fn take_mesh_profile() -> [u64; 4] {
+    std::array::from_fn(|i| MESH_PROFILE[i].swap(0, Ordering::Relaxed))
+}
+
 /// A root argument as the title set it.
 #[derive(Debug, Clone, Default)]
 enum Root {
@@ -2086,6 +2121,7 @@ impl State {
 
     fn dispatch_mesh_fallback(&mut self, list: &HostList, p: &HostPipeline,
         fallback: &crate::pipeline::host::MeshFallback, groups: u32) -> bool {
+        let _profile = MeshProfile::start(0);
         if groups == 0 { return true; }
         if groups > 65_535 {
             once!(groups, "mesh fallback dispatch exceeds the host's 65,535 group limit and is clamped");
@@ -2864,6 +2900,7 @@ impl State {
         fallback: &crate::pipeline::host::MeshFallback,
         (stride, max, arguments, count): (u32, u32, u64, Option<u64>)) -> bool {
         use crate::mesh_indirect::{COMPUTE_STRIDE, draw_stride};
+        let _profile = MeshProfile::start(2);
         if max == 0 {
             return true;
         }
