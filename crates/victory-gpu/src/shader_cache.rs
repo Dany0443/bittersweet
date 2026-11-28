@@ -407,7 +407,7 @@ fn decode_fallback(bytes: &[u8]) -> Option<MeshFallback> {
     let output_bytes = layout.bytes(1).into_iter().sum::<u64>();
     (rest.is_empty() && expanded <= 1 && compute.stage == HwStage::Cs
         && vertex.stage == HwStage::Vs && threads > 0 && threads <= 128
-        && max_vertices <= 256 && max_primitives <= 256 && output_bytes <= 32 * 1024)
+        && max_vertices <= 256 && max_primitives <= 256 && output_bytes <= 32 << 20)
         .then_some(MeshFallback {
         compute, vertex, expanded: expanded == 1,
         layout,
@@ -516,5 +516,20 @@ mod tests {
         assert_eq!(decode_fallback(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode_fallback(&[bytes.as_slice(), &[0]].concat()), None);
         assert_eq!(decode_fallback(b"VMF0"), None);
+    }
+
+    /// The host's 32 KiB mesh output cap does not apply to the compute
+    /// fallback, so a group past it must still load from the cache.
+    #[test]
+    fn mesh_fallback_entries_past_the_host_mesh_cap_load() {
+        let host = shader();
+        let fallback = MeshFallback {
+            compute: HostShader { stage: HwStage::Cs, ..host.clone() },
+            vertex: HostShader { stage: HwStage::Vs, ..host },
+            expanded: false,
+            layout: MeshLayout { threads: 128, max_vertices: 256, max_primitives: 256, vertex_dwords: 40, primitive_dwords: 0 },
+        };
+        assert!(fallback.layout.bytes(1).iter().sum::<u64>() > 32 * 1024);
+        assert_eq!(decode_fallback(&encode_fallback(&fallback)), Some(fallback));
     }
 }
