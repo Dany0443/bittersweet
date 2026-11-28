@@ -41,6 +41,9 @@ sweep. The sweep caches the combined address range for each buffer and
 recalculates it when an edge view moves inward or disappears. The existing
 periodic revalidation still revisits all buffer descriptors.
 
+State-transition command lists and their allocators go back to a bounded
+shared pool when the owning list resets after GPU completion.
+
 The experimental native compute entry point reads a console pipeline
 description and wraps its program in an internal shader container. This
 reuses the existing shader translator and pipeline cache. It rejects

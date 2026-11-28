@@ -120,6 +120,9 @@ dark scenes and can flatten lighting.
 `VICTORY_GUARD_FAST=1` tests a shorter write-watch path for mapped buffers
 already protected by the runtime.
 
+The renderer shares completed state-transition command lists. Set
+`VICTORY_PRELUDE_POOL=0` to compare against per-list allocation.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·

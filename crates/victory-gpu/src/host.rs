@@ -1166,9 +1166,7 @@ pub(crate) struct HostList {
     /// What the list does with depth textures that have a colour twin, by
     /// twin ([`TwinUse`]).
     twins: Mutex<std::collections::HashMap<usize, TwinUse>>,
-    /// The list that runs those transitions just before this one, made
-    /// when the list first has such transitions ([`lazy_prelude`]).
-    prelude: OnceLock<Option<Prelude>>,
+    prelude: Mutex<Option<Prelude>>,
     /// The pipelines the list binds, for reports of slow submissions.
     pipelines: Mutex<std::collections::BTreeSet<String>>,
     /// The work its indirect executions may still do (`indirect`): a
@@ -1193,6 +1191,20 @@ pub(crate) struct HostList {
 
 /// A list's prelude: an allocator and a closed list.
 type Prelude = (ID3D12CommandAllocator, ID3D12GraphicsCommandList);
+
+struct IdlePrelude(Prelude);
+
+// SAFETY: only the thread that takes the idle D3D12 pair records into it.
+unsafe impl Send for IdlePrelude {}
+
+static IDLE_PRELUDES: Mutex<Vec<IdlePrelude>> = Mutex::new(Vec::new());
+const IDLE_PRELUDE_LIMIT: usize = 32;
+
+fn prelude_pool() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    lazy_prelude()
+        && *ON.get_or_init(|| std::env::var_os("VICTORY_PRELUDE_POOL").is_none_or(|v| v != "0"))
+}
 
 /// Whether a host list's prelude is made when the list first needs one. A
 /// prelude runs the texture transitions and twin copies a list needs before
@@ -3589,10 +3601,11 @@ impl Host {
                 &allocator,
                 None,
             )?;
-            let prelude = OnceLock::new();
-            if !lazy_prelude() {
-                let _ = prelude.set(self.make_prelude());
-            }
+            let prelude = Mutex::new(if lazy_prelude() {
+                None
+            } else {
+                self.make_prelude()
+            });
             Ok(HostList {
                 allocator,
                 list,
@@ -5567,6 +5580,19 @@ impl HostList {
         if let Err(e) = reset {
             fail(format_args!("a host command list did not reset ({e})"));
         }
+        if prelude_pool() {
+            let prelude = self
+                .prelude
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            if let Some(prelude) = prelude {
+                let mut idle = IDLE_PRELUDES.lock().unwrap_or_else(|e| e.into_inner());
+                if idle.len() < IDLE_PRELUDE_LIMIT {
+                    idle.push(IdlePrelude(prelude));
+                }
+            }
+        }
         let mesh = self
             .mesh_scratch
             .lock()
@@ -5905,11 +5931,20 @@ impl HostList {
         if barriers.is_empty() && syncs.is_empty() {
             return None;
         }
-        let Some((allocator, list)) = self
-            .prelude
-            .get_or_init(|| host().and_then(|h| h.make_prelude()))
-            .as_ref()
-        else {
+        let mut held = self.prelude.lock().unwrap_or_else(|e| e.into_inner());
+        if held.is_none() {
+            if prelude_pool() {
+                let idle = IDLE_PRELUDES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .pop();
+                *held = idle.map(|IdlePrelude(prelude)| prelude);
+            }
+            if held.is_none() {
+                *held = host().and_then(|h| h.make_prelude());
+            }
+        }
+        let Some((allocator, list)) = held.as_ref() else {
             fail(format_args!("no host list for a state prelude"));
         };
         // SAFETY: the prelude is not executing (every submission is waited
@@ -8425,6 +8460,27 @@ mod spare {
         assert_eq!(spare.take(1), Some(2));
         assert_eq!(spare.bytes, 0);
         assert!(spare.kept.is_empty());
+    }
+
+    #[test]
+    fn finished_prelude_leaves_its_list_after_reset() {
+        let Some(host) = host() else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        let list = host.new_list().unwrap();
+        let buffer = host.uav_buffer(65536).unwrap();
+        list.begin_command();
+        list.buffer_state(&buffer, BUFFER_WRITE);
+        list.keep(&buffer);
+        list.close();
+        host.execute(&[&list]);
+        assert!(list.prelude.lock().unwrap().is_some());
+        list.reset();
+        assert_eq!(
+            list.prelude.lock().unwrap().is_none(),
+            super::prelude_pool()
+        );
     }
 
     #[test]
