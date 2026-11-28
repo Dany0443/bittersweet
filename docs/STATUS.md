@@ -76,6 +76,13 @@ logged a RADV GPU virtual-memory fault. It started with less free swap.
 Neither run produced enough world frames to measure gameplay speed or
 establish whether pooling affects device stability.
 
+The indexed-buffer regression reproduced a refresh choosing a newly
+registered overlapping buffer while the slot still pointed to the old
+copy. The fix retained the bound copy and passed the Proton descriptor
+tests. The warmed title run started with 1,121 MiB of free swap, reached
+zero and exited during world loading after 42 seconds. It produced no
+world sample, and the logs identify neither a GPU fault nor an exit cause.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
