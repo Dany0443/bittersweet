@@ -29,6 +29,12 @@ The next trial used the same executable and 1 MiB threshold with
 memory fault and the runtime lost the device after 54 seconds. The only
 world sample measured 0.5 fps. The relay remains off in the test profile.
 
+The opt-in guarded-view shortcut passed nine Proton write-watch tests,
+including tracked writes and the fallback for unarmed blocks. The warmed
+title run reached the account picker, then exited after 86 seconds before
+producing a world sample. Neither a memory stop nor a GPU fault was logged.
+The runtime savings remain unmeasured.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
