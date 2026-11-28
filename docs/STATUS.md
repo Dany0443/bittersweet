@@ -22,6 +22,12 @@ rate was 3.2 fps across 19 samples, with 38% median card utilization and
 5,987 MiB peak VRAM use. The run reached the 155-second limit without a
 logged GPU fault. Scene mix and starting memory differed between runs, so
 the trial shows less CPU scanning without establishing a sustained speedup.
+The user observed 4 to 5 fps in the first seconds, then 3 to 4 fps.
+
+The next trial used the same executable and 1 MiB threshold with
+`VICTORY_RELAY=2` and `VICTORY_LATE_WAIT=3`. RADV logged a GPU virtual
+memory fault and the runtime lost the device after 54 seconds. The only
+world sample measured 0.5 fps. The relay remains off in the test profile.
 
 ## Validation: 2026-11-27
 
