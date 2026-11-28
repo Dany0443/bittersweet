@@ -136,6 +136,12 @@ The renderer shares completed state-transition command lists. Set
 scratch on GPUs that support upload heaps in VRAM. The runtime falls back
 to system-memory uploads when the local GPU budget is tight.
 
+On Proton, `VICTORY_PAGE_FILE_DIR='Z:\path\to\private-ssd-directory'` tests
+temporary disk backing for console physical pages. Use an existing private
+directory outside the repository with enough space for the console page
+pools, which can occupy several GiB. The OS can reclaim inactive pages
+through the filesystem, at the cost of extra disk I/O.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·

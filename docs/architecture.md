@@ -69,6 +69,12 @@ DirectStorage physical-page writes look up every mapped view of the
 destination pages. They open the write guards before decoding or copying
 and publish the changed view ranges when the write window closes.
 
+Proton can back console physical-page sections with temporary files in a
+configured directory. Each alias still maps the same section. Disk-backed
+sections use the renderer's ordinary copy path and are excluded from GPU
+heap import. If file creation or mapping fails, the runtime uses its
+standard pagefile-backed section.
+
 With the guard shortcut enabled, advance kernel queries omit ranges
 that start in an armed view. The refresh still checks the current guard
 state and falls back to the kernel if the view has been remapped.

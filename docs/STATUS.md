@@ -138,6 +138,17 @@ texture staging. Both runs exhausted swap while VRAM use was still below
 2.3 GiB in the samples. The abrupt exit in the direct I/O run remains
 unexplained.
 
+An experimental Proton run backed console physical pages with temporary SSD
+files. It reached five world samples and ran until the 155-second test
+timeout. Available RAM stayed above 2.6 GiB in the sampled window, even
+when swap was full. The backing files used about 4.1 GiB on disk and
+were removed after the run. The build started with a cold shader cache
+and still had about 1,900 pipelines pending in its first substantial world
+sample. Median world speed was 0.1 fps, with about 2.5 seconds per frame
+spent on buffer copies. Starting memory also differed from the previous
+runs. This establishes that the file-backed path reached the world and
+leaves its performance and visual effects unresolved.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
