@@ -487,6 +487,10 @@ pub(crate) static PREPARING: [std::sync::atomic::AtomicU64; 4] = [
     std::sync::atomic::AtomicU64::new(0),
 ];
 
+#[cfg(feature = "diagnostics")]
+static REFRESH_COVERAGE: [std::sync::atomic::AtomicU64; 3] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 3];
+
 /// Host buffers made since the start, as (count, bytes): in the upload heap
 /// (staging, list scratch), shared with the processor (host copies of title
 /// memory) and the graphics card's own (indirect arguments, twins' copies).
@@ -2308,6 +2312,8 @@ struct Deferred {
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
     refreshed: std::collections::HashSet<(usize, usize, usize)>,
+    /// Coverage tracking for the mesh fallback host path.
+    refreshed_ranges: crate::refresh_coverage::RefreshCoverage,
     /// Textures whose contents the list brings up to date.
     textures: std::collections::HashSet<usize>,
     /// Bottom-of-pipe writes, done once the list has run: address, what,
@@ -6122,6 +6128,7 @@ impl HostList {
             .copies
             .push(Step::Copy(dst as usize, src as usize, len));
         deferred.refreshed.clear();
+        deferred.refreshed_ranges.clear();
     }
 
     /// Copies `len` bytes of title memory at `src` into the list's upload
@@ -6142,8 +6149,28 @@ impl HostList {
         len: usize,
     ) {
         let mut deferred = self.deferred();
-        let key = (std::sync::Arc::as_ptr(shadow) as usize, address, len);
-        if deferred.refreshed.insert(key) {
+        let key = std::sync::Arc::as_ptr(shadow) as usize;
+        static COVERAGE: OnceLock<bool> = OnceLock::new();
+        let coverage = *COVERAGE.get_or_init(|| host().is_some_and(|h| !h.mesh_shaders()));
+        let needed = if coverage {
+            deferred.refreshed_ranges.insert(key, address, len)
+        } else {
+            deferred.refreshed.insert((key, address, len))
+        };
+        #[cfg(feature = "diagnostics")]
+        if coverage {
+            REFRESH_COVERAGE[usize::from(!needed)].fetch_add(1, Ordering::Relaxed);
+            // Optional comparison to the original exact-range set. This
+            // costs memory and time and is for diagnosis, not frame timing.
+            static COMPARE: OnceLock<bool> = OnceLock::new();
+            if *COMPARE.get_or_init(|| std::env::var_os("VICTORY_COVERAGE_COMPARE").is_some_and(|v| v == "1")) {
+                let was_new = deferred.refreshed.insert((key, address, len));
+                if !needed && was_new {
+                    REFRESH_COVERAGE[2].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        if needed {
             deferred
                 .copies
                 .push(Step::Refresh(shadow.clone(), address, len));
@@ -6355,8 +6382,10 @@ impl HostList {
     /// Runs `work` when the list is submitted, in order with its copies.
     /// `work` may write title memory (refreshes after it copy again).
     pub(crate) fn defer(&self, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Run(Box::new(work)));
-        self.deferred().refreshed.clear();
+        let mut deferred = self.deferred();
+        deferred.copies.push(Step::Run(Box::new(work)));
+        deferred.refreshed.clear();
+        deferred.refreshed_ranges.clear();
     }
 
     /// As [`HostList::defer`], for work that writes only host memory.
@@ -7693,6 +7722,13 @@ impl Meter {
         }
         for (pipeline, [direct, indirect]) in crate::draw::take_mesh_hotspots() {
             tracing::info!(pipeline, direct, indirect, frames, "mesh fallback pipeline calls");
+        }
+        #[cfg(feature = "diagnostics")]
+        {
+            let [queued, covered, additional_if_compared] = REFRESH_COVERAGE.each_ref().map(|count| count.swap(0, Ordering::Relaxed));
+            if queued + covered != 0 {
+                tracing::info!(queued, covered, additional_if_compared, frames, "mesh fallback buffer refresh requests");
+            }
         }
         late_line(frames);
         card_clock_line(frames, ms);
