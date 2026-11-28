@@ -62,6 +62,12 @@ stopped it after 53 seconds with 912 MiB RAM available and no free swap.
 Starting memory differed, and the shorter trial left visual quality and
 performance unverified. The default test reserve remains 2,048 MiB.
 
+The SDWA half-result fix passed GPU readback on the RX 7600 under Proton.
+The warmed game run started with 6,098 MiB of available RAM and 2,478 MiB
+of free swap. The monitor stopped it after 47 seconds with 251 MiB of RAM
+available and no free swap. It produced no world sample, so the fix's
+effect on game visuals remains unverified.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
