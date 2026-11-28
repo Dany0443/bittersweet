@@ -60,6 +60,7 @@ pub(crate) struct HostHeap {
     /// buffers from the whole heap.
     buffers: Mutex<std::collections::BTreeSet<u32>>,
     pub(crate) buffer_frame: std::sync::atomic::AtomicU64,
+    texture_preload_frame: std::sync::atomic::AtomicU64,
     pub(crate) buffer_sweep: Mutex<super::buffer_sweep::BufferSweep<crate::shadow::Shadow>>,
     /// Of those and of the slots that left the set: the ones written since
     /// [`HostHeap::buffer_changes`] last took them.
@@ -766,6 +767,7 @@ impl HostHeap {
             strides,
             buffers: Mutex::default(),
             buffer_frame: std::sync::atomic::AtomicU64::new(u64::MAX),
+            texture_preload_frame: std::sync::atomic::AtomicU64::new(0),
             buffer_sweep: Mutex::default(),
             changed: Mutex::default(),
             textures: Mutex::default(),
@@ -920,6 +922,13 @@ impl HostHeap {
     /// The table's buffer, for a list to hold.
     pub(crate) fn strides_buffer(&self) -> Option<&ID3D12Resource> {
         self.strides.as_ref().map(|s| &s.0)
+    }
+
+    pub(crate) fn claim_texture_preload(&self, frame: u64) -> bool {
+        let stamp = frame.saturating_add(1);
+        self.texture_preload_frame
+            .fetch_max(stamp, std::sync::atomic::Ordering::Relaxed)
+            < stamp
     }
 
     /// Up to `max` title slots whose texture view is due at `frame`, each
@@ -2609,6 +2618,19 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_heap_claims_at_most_one_preload_per_frame() {
+        let Some(heap) = HostHeap::new(false, 8) else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        assert!(heap.claim_texture_preload(0));
+        assert!(!heap.claim_texture_preload(0));
+        assert!(heap.claim_texture_preload(2));
+        assert!(!heap.claim_texture_preload(1));
+        assert!(!heap.claim_texture_preload(2));
+    }
 
     #[test]
     fn indexed_buffer_refresh_keeps_the_shadow_bound_to_the_slot() {

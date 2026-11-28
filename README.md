@@ -97,6 +97,15 @@ loading the world. Use the same Proton prefix and environment as above.
   "$VICTORY_GAME_DIR\\shaders.rpf"
 ```
 
+Leave out `--early-only` to attempt every pipeline in the archive. The
+first full compile can take longer, and the game can still create pipelines
+that only appear at runtime.
+
+`VICTORY_PRELOAD_TEXTURES=1` lets graphics frames stage small batches of
+queued textures the game has already described, including while a loading
+screen is visible. The runtime uses the existing memory limits. Geometry
+and texture data must still arrive through the game's streaming requests.
+
 To update, run `git pull --ff-only` and repeat the build command. For host
 checks without starting the title, run `cargo run -p bittersweet -- doctor`.
 

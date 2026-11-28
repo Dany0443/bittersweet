@@ -349,6 +349,11 @@ const RECHECK_FRAMES: [u64; 5] = [4, 12, 40, 120, 400];
 /// was, and that found it changed (uploaded again), since the start.
 pub(crate) static HEAP_TEXTURES_RECHECKED: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
+fn texture_preload() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PRELOAD_TEXTURES").is_some_and(|v| v == "1"))
+}
+
 /// Whether textures picked by index are looked at again after their upload
 /// (`VICTORY_HEAP_RECHECK=0`: no).
 fn heap_recheck() -> bool {
@@ -933,6 +938,14 @@ impl State {
             self.host_heaps = self.heaps;
             self.host_roots = [0; 2];
         }
+        if !compute
+            && texture_preload()
+            && let Some(heap) = self.view_heap()
+            && let Some(host) = heap.host()
+            && host.claim_texture_preload(crate::frame::current())
+        {
+            self.heap_textures(list, heap, host, true);
+        }
         // The depth target a draw only tests, for the views of it that the
         // draw's shaders read (`readable`).
         let tested = if !compute && self.depth_state == DEPTH_READ {
@@ -1384,12 +1397,7 @@ impl State {
     /// copy. A list refreshes them where it first runs such a shader;
     /// title writes recorded later in the same list are not seen.
     fn heap_buffers(&self, list: &HostList) -> Option<u64> {
-        let heap = self
-            .heaps
-            .iter()
-            .filter(|&&h| h != 0)
-            .map(|&h| crate::descriptor::heap(h as This))
-            .find(|h| !h.samplers())?;
+        let heap = self.view_heap()?;
         let host = heap.host()?;
         let gpu = host.strides_gpu()?;
         let buffer = host.strides_buffer()?;
@@ -1501,7 +1509,7 @@ impl State {
             }
             shadow.refresh(list, *from, to - from);
         }
-        self.heap_textures(list, heap, host);
+        self.heap_textures(list, heap, host, false);
         HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
         HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
         static LOGGED: AtomicU64 = AtomicU64::new(0);
@@ -1519,6 +1527,14 @@ impl State {
             );
         }
         Some(gpu)
+    }
+
+    fn view_heap(&self) -> Option<&crate::descriptor::Heap> {
+        self.heaps
+            .iter()
+            .filter(|&&h| h != 0)
+            .map(|&h| crate::descriptor::heap(h as This))
+            .find(|h| !h.samplers())
     }
 
     /// The texture side of [`State::heap_buffers`]: textures the title fills
@@ -1541,6 +1557,7 @@ impl State {
         list: &HostList,
         heap: &crate::descriptor::Heap,
         host: &crate::descriptor::host::HostHeap,
+        preload: bool,
     ) {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if !*ON.get_or_init(|| std::env::var_os("VICTORY_HEAP_TEXTURES").is_none_or(|v| v != "0")) {
@@ -1570,6 +1587,9 @@ impl State {
         // returned here, and a slot whose texture had been streamed out
         // kept its host copy for as long as the card was full).
         let room = crate::resource::room();
+        if preload && !room {
+            return;
+        }
         if !room {
             HEAP_TEXTURES_FULL.fetch_add(1, Ordering::Relaxed);
             once!("textures picked by index: the card has no room for more; they wait");
@@ -1577,11 +1597,14 @@ impl State {
         let mut refused = 0;
         // Slots whose texture's memory the runtime mapped, unmapped or
         // wrote since the last pass are due again.
-        host.texture_slots_remapped(frame);
-        #[cfg(feature = "diagnostics")]
-        crate::material_trace::report(heap, host, frame);
-        host.texture_sweep(heap, frame);
-        let (due, census) = host.texture_slots_due(frame, 4096);
+        if !preload {
+            host.texture_slots_remapped(frame);
+            #[cfg(feature = "diagnostics")]
+            crate::material_trace::report(heap, host, frame);
+            host.texture_sweep(heap, frame);
+        }
+        let selection_started = std::time::Instant::now();
+        let (due, census) = host.texture_slots_due(frame, if preload { 32 } else { 4096 });
         HEAP_TEXTURES_WAITING.store(census[0], Ordering::Relaxed);
         for (count, now) in HEAP_TEXTURES_QUEUE.iter().zip(census) {
             count.store(now, Ordering::Relaxed);
@@ -1594,9 +1617,12 @@ impl State {
         // the looks are now only for what that does not tell.)
         static PASSED: AtomicU64 = AtomicU64::new(0);
         let now = crate::host::now_ms();
-        let took = now
-            .saturating_sub(PASSED.swap(now, Ordering::Relaxed))
-            .max(1);
+        let took = if preload {
+            33
+        } else {
+            now.saturating_sub(PASSED.swap(now, Ordering::Relaxed))
+                .max(1)
+        };
         let most = (4000 / took).clamp(16, 256);
         // What a table entry of a texture a shader samples says.
         let sampled = UsedResource {
@@ -1631,10 +1657,31 @@ impl State {
         } else {
             (per_frame, span)
         };
-        let began = std::time::Instant::now();
+        let (per_frame, span) = if preload {
+            (
+                per_frame.min(8 << 20),
+                span.min(std::time::Duration::from_millis(2)),
+            )
+        } else {
+            (per_frame, span)
+        };
+        let began = if preload {
+            selection_started
+        } else {
+            std::time::Instant::now()
+        };
         for (index, write) in due {
             if SPENT.load(Ordering::Relaxed) >= per_frame || began.elapsed() > span {
                 break;
+            }
+            let candidate = heap.handle(index).and_then(crate::descriptor::view);
+            if preload
+                && !matches!(&candidate, Some(View::Placed(false, resource, _))
+                    if resource[0] != 1
+                        && crate::resource::placed_bytes_from(resource, 0)
+                            .is_some_and(|bytes| bytes <= per_frame.saturating_sub(SPENT.load(Ordering::Relaxed))))
+            {
+                continue;
             }
             // A placed texture whose memory is not mapped (not streamed in
             // yet, or streamed out again: the heap keeps tens of thousands
@@ -1686,9 +1733,7 @@ impl State {
                 }
             }
             let mut partly = None;
-            if let Some(View::Placed(false, resource, desc)) =
-                heap.handle(index).and_then(crate::descriptor::view)
-            {
+            if let Some(View::Placed(false, resource, desc)) = candidate {
                 let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
                 // Of the mips the view shows: what lies behind them is
                 // another texture's.
@@ -1818,6 +1863,9 @@ impl State {
             SPENT.fetch_add(bytes, Ordering::Relaxed);
             HEAP_TEXTURE_BYTES.fetch_add(bytes, Ordering::Relaxed);
             HEAP_TEXTURES.fetch_add(1, Ordering::Relaxed);
+            if preload && bytes != 0 {
+                once!("recorded an early indexed texture upload (VICTORY_PRELOAD_TEXTURES=1)");
+            }
             match memory {
                 // Whole and uploaded: looked at again (see above).
                 Some((at, len)) => {

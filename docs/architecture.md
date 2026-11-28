@@ -53,6 +53,10 @@ The optional GPU upload path applies to texture staging and command-list
 scratch. It checks D3D12 upload heap support and the local memory budget
 before allocating. Title buffer shadows still use writable shared memory.
 
+An optional early texture pass shares the indexed texture queue and its
+frame budget. It visits a small batch of placed texture views during
+graphics binding, before the first draw needs the indexed buffer sweep.
+
 The experimental native compute entry point reads a console pipeline
 description and wraps its program in an internal shader container. This
 reuses the existing shader translator and pipeline cache. It rejects
