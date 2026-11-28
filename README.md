@@ -113,6 +113,10 @@ misses without removing the surrounding draws. Lighting, shadows, and
 reflections can look different. Unset the variable to restore normal
 shader translation.
 
+With the ray-tracing structure builder off, `VICTORY_AMBIENT=1` tests a
+constant indirect light after the screen-probe resolve. It is meant for
+dark scenes and can flatten lighting.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·

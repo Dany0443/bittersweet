@@ -296,6 +296,13 @@ The page-view notifications adapt [Scarlight PR #146](https://github.com/pablogo
 head `db2413d5d9bb070cf090982df7fc010c62850910`. This port uses the
 existing xmem mapping lock, write guards, and per-heap texture history.
 
+## Screen-probe ambient lighting
+
+The constant indirect-light fallback adapts the screen-probe binding in
+[VIctory PR #3414](https://github.com/Marvisak/VIctory/pull/3414), head
+`ed1d879bfe9244ebd4c35992e156e38b6da87740`, credited there to Belobug.
+This port uses an ordered D3D12 UAV clear through VKD3D-Proton.
+
 ## RAM pressure cache cleanup
 
 System-memory caches now become eligible for cleanup sooner when available RAM

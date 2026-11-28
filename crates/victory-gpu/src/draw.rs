@@ -1948,7 +1948,60 @@ impl State {
             // SAFETY: an open list with everything set.
             _ => unsafe { list.list.Dispatch(x, y, z) },
         }
+        if x != 0 && y != 0 && z != 0 {
+            self.ambient_resolve(list, p);
+        }
         DISPATCHED.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn ambient_resolve(&mut self, list: &HostList, p: &HostPipeline) {
+        use crate::ambient::{self, OFFSET, SLOT};
+        let Some(stage) = p
+            .stages
+            .first()
+            .filter(|stage| stage.shader.ambient_resolve)
+        else {
+            return;
+        };
+        if !stage.translated().used.iter().any(|u| {
+            u.kind == ResourceType::Uav
+                && u.root == RootType::Table
+                && (u.slot, u.table_offset_dwords) == (SLOT, OFFSET)
+        }) {
+            return;
+        }
+        let Some(Root::Table(table)) = self.roots_ref(true).get(usize::from(SLOT)) else {
+            return;
+        };
+        let Some(View::Unordered(resource, 0, Some(words))) = table
+            .checked_add(u64::from(OFFSET) * 4)
+            .and_then(crate::descriptor::view)
+        else {
+            return;
+        };
+        if resource == 0 || !ambient::compatible_view(words) {
+            return;
+        }
+        let resource = resource as This;
+        let Some(copy) = crate::resource::host_copy(resource) else {
+            return;
+        };
+        // SAFETY: a live host texture held by `copy`.
+        if !ambient::compatible_texture(&unsafe { copy.texture.GetDesc() }) {
+            return;
+        }
+        crate::list::ensure_state(
+            list,
+            resource,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS.0 as u32,
+        );
+        match ambient::record(list, &copy.texture) {
+            Ok(()) => {
+                self.host_heaps = [usize::MAX; 2];
+                once!("screen-probe ambient fallback recorded");
+            }
+            Err(error) => once!(%error, "screen-probe ambient fallback could not record"),
+        }
     }
 
     /// What a draw or dispatch runs, for the device-removed report

@@ -64,6 +64,8 @@ pub(crate) struct Shader {
     pub(crate) hash: String,
     container: Vec<u8>,
     #[cfg(windows)]
+    pub(crate) ambient_resolve: bool,
+    #[cfg(windows)]
     translated: OnceLock<Option<Translated>>,
     #[cfg(windows)]
     mesh_fallback: OnceLock<Option<victory_shader::emit::MeshFallback>>,
@@ -122,6 +124,8 @@ impl Shader {
             stage,
             hash: blake3::hash(bytes).to_hex()[..16].to_owned(),
             container: bytes.to_vec(),
+            #[cfg(windows)]
+            ambient_resolve: stage == "compute" && crate::ambient::selected(bytes),
             #[cfg(windows)]
             translated: OnceLock::new(),
             #[cfg(windows)]

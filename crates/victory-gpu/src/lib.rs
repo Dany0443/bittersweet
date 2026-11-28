@@ -19,6 +19,8 @@
 // their D3D12 callers are intentionally compiled only on Windows.
 #![cfg_attr(not(windows), allow(dead_code))]
 
+#[cfg(windows)]
+mod ambient;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod capture;
 pub mod console;

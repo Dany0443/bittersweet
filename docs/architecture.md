@@ -53,6 +53,10 @@ DirectStorage physical-page writes look up every mapped view of the
 destination pages. They open the write guards before decoding or copying
 and publish the changed view ranges when the write window closes.
 
+The optional screen-probe fallback clears the matching resolve's packed
+indirect-light UAV after its dispatch. Ordered D3D12 barriers surround the
+clear. The title's later lighting pass still samples its own materials.
+
 ## Crates
 
 | Crate | Role |
