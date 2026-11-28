@@ -53,6 +53,15 @@ The monitor ended the restored-resolution run after 105 seconds under memory
 pressure. The cutscene coverage and starting memory differed between the runs.
 Keep the original scale while investigating texture residency and lighting.
 
+At world load in the restored-resolution run, Proton reported 1,583 MiB
+of available physical RAM and 3,825 MiB of available commit, which could
+pause indexed uploads under the configured 2,048 MiB reserve even with
+VRAM available. A later run with a 1,024 MiB reserve uploaded 1,429 indexed
+slots (152 MiB) with 26,941 waiting in its only world sample. The monitor
+stopped it after 53 seconds with 912 MiB RAM available and no free swap.
+Starting memory differed, and the shorter trial left visual quality and
+performance unverified. The default test reserve remains 2,048 MiB.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
