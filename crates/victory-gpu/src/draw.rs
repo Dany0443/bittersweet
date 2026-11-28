@@ -2190,9 +2190,9 @@ impl State {
     /// Present that state as compute roots while binding the translated mesh
     /// stage, then restore the title's independent compute state.
     fn bind_mesh_fallback_compute(&mut self, list: &HostList, p: &HostPipeline) -> bool {
-        let saved = std::mem::replace(&mut self.compute, self.graphics.clone());
+        std::mem::swap(&mut self.compute, &mut self.graphics);
         let bound = self.bind(list, p, true);
-        self.compute = saved;
+        std::mem::swap(&mut self.compute, &mut self.graphics);
         bound
     }
 
