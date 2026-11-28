@@ -7691,6 +7691,9 @@ impl Meter {
                 "mesh fallback CPU recording time"
             );
         }
+        for (pipeline, [direct, indirect]) in crate::draw::take_mesh_hotspots() {
+            tracing::info!(pipeline, direct, indirect, frames, "mesh fallback pipeline calls");
+        }
         late_line(frames);
         card_clock_line(frames, ms);
         crate::shadow::back_line(frames);

@@ -506,6 +506,8 @@ HLSL compiler without creating a GPU device.
 
 Mesh fallback recording-time profiling was added locally to measure direct
 and indirect command preparation on the Linux host.
+Optional per-pipeline call counts were added locally to identify candidates
+for future mesh translation work; they are disabled unless requested.
 The fallback temporarily swaps its root state locally to avoid cloning
 graphics root constants on every mesh dispatch.
 Repeated host command lists are submitted in ordered, completed batches
