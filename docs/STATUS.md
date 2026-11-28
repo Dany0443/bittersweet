@@ -14,6 +14,15 @@ late indoor frame showed Lucia's face and hair. Other frames were dark or
 washed out. This trial had more free swap at launch than earlier runs and
 did not isolate the fallback's visual or performance effect.
 
+The same executable with a 1 MiB minimum for GPU-side buffer comparisons
+placed 53 buffer copies on the card within the existing 512 MiB cap. Late
+CPU scans covered roughly 171 to 178 MB per frame, compared with roughly
+258 to 282 MB in late samples from the preceding run. Median world frame
+rate was 3.2 fps across 19 samples, with 38% median card utilization and
+5,987 MiB peak VRAM use. The run reached the 155-second limit without a
+logged GPU fault. Scene mix and starting memory differed between runs, so
+the trial shows less CPU scanning without establishing a sustained speedup.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
