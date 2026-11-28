@@ -1768,6 +1768,46 @@ mod mesh_as_compute_tests {
     use crate::native::{MeshIo, StageIo};
 
     #[test]
+    fn fallback_reads_uniform_mesh_group_without_wave_operations() {
+        let lower = |words: &[u32], mesh_as_compute: bool| {
+            let code: Vec<_> = words.iter().copied().chain([0xBF81_0000]).flat_map(u32::to_le_bytes).collect();
+            let native = NativeProgram {
+                stage: HwStage::Ms,
+                wave64: false,
+                vgprs: 8,
+                layout: vec![],
+                used: vec![],
+                io: StageIo::Ms(MeshIo {
+                    outputs: vec![], clip_cntl: 0, threads: 128,
+                    max_vertices: 128, max_primitives: 128, topology: 2, lds_bytes: 0,
+                }),
+                code,
+            };
+            let p = ir::build(&native.code, native.wave64, native.vgprs).unwrap();
+            let st = structure::structure(&p).unwrap();
+            let io = io::raise(&p, &native).unwrap();
+            let res = resource::track(&p, &native.layout, native.stage, Some(&st)).unwrap();
+            lower::lower(&lower::Parts {
+                native: &native, p: &p, st: &st, io: &io, res: &res,
+                inputs: vec![], outputs: vec![], prims: vec![], mesh_stride: 128,
+                mesh_as_compute,
+            }).unwrap().wave_ops
+        };
+        // v_readfirstlane_b32 s2, v5: the unmodified mesh group input.
+        assert!(!lower(&[0x7E04_0505], true));
+        assert!(lower(&[0x7E04_0505], false));
+        // v0 is not the group input and must still use a wave operation.
+        assert!(lower(&[0x7E04_0500], true));
+        // Overwriting v5 changes its SSA value; it is no longer the input.
+        assert!(lower(&[0x7E0A_0300, 0x7E04_0505], true));
+        let io = crate::io::Io {
+            inputs: vec![(ir::Value(7), crate::io::Input::MeshGroup)],
+            ..Default::default()
+        };
+        assert!(!lower::mesh_group_read_is_uniform(true, true, Some(ir::Value(7)), &io));
+    }
+
+    #[test]
     fn fallback_title_bindings_do_not_overlap_pixel_bindings() {
         for (base, pixel) in [(MESH_COMPUTE_SPACE_BASE, false), (0, true)] {
             let mut shader = shader::Shader::new(pixel);

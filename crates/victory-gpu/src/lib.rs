@@ -50,6 +50,8 @@ pub mod object;
 pub mod pipeline;
 #[cfg(windows)]
 mod primitive;
+#[cfg(any(windows, test))]
+mod refresh_coverage;
 pub mod query;
 pub mod queue;
 pub mod resource;

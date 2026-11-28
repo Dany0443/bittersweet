@@ -487,6 +487,10 @@ pub(crate) static PREPARING: [std::sync::atomic::AtomicU64; 4] = [
     std::sync::atomic::AtomicU64::new(0),
 ];
 
+#[cfg(feature = "diagnostics")]
+static REFRESH_COVERAGE: [std::sync::atomic::AtomicU64; 3] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 3];
+
 /// Host buffers made since the start, as (count, bytes): in the upload heap
 /// (staging, list scratch), shared with the processor (host copies of title
 /// memory) and the graphics card's own (indirect arguments, twins' copies).
@@ -571,6 +575,10 @@ pub(crate) fn fail(what: std::fmt::Arguments) -> ! {
         Some(report) => report(&text),
         None => std::process::abort(),
     }
+}
+
+fn fence_wait_completed(wait_result: u32, completed: u64, target: u64) -> bool {
+    wait_result == 0 && completed != u64::MAX && completed >= target
 }
 
 /// The host GPU, created on first use; `None` without one (a run then
@@ -1070,6 +1078,27 @@ mod tests {
         assert_eq!(s.update(1, 'a', BUFFER_READ), Some(BUFFER_WRITE));
         let lasts: Vec<_> = s.lasts().map(|(r, l)| (*r, l)).collect();
         assert_eq!(lasts, [('a', BUFFER_READ)]);
+    }
+
+    #[test]
+    fn mesh_scratch_transitions_back_to_write_only_when_reused() {
+        let mut s = BufferStates::default();
+        let indirect = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT.0 as u32;
+        let mesh_read = (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE.0
+            | D3D12_RESOURCE_STATE_INDEX_BUFFER.0) as u32;
+        s.next_command();
+        assert_eq!(s.update(1, 'c', BUFFER_WRITE), None);
+        s.next_command();
+        assert_eq!(s.update(1, 'c', indirect), Some(BUFFER_WRITE));
+        assert_eq!(s.update(2, 'm', BUFFER_WRITE), None);
+        s.next_command();
+        assert_eq!(s.update(2, 'm', mesh_read), Some(BUFFER_WRITE));
+        let last: Vec<_> = s.lasts().map(|(r, state)| (*r, state)).collect();
+        assert!(last.contains(&('c', indirect)));
+        assert!(last.contains(&('m', mesh_read)));
+        s.next_command();
+        assert_eq!(s.update(1, 'c', BUFFER_WRITE), Some(indirect));
+        assert_eq!(s.update(2, 'm', BUFFER_WRITE), Some(mesh_read));
     }
 
     #[test]
@@ -1870,6 +1899,25 @@ impl Drop for Counted {
     }
 }
 
+/// Ordered batches in which no list is recorded twice.
+fn unique_batches<T>(items: &[&T]) -> Vec<std::ops::Range<usize>> {
+    let mut batches = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut start = 0;
+    for (index, item) in items.iter().enumerate() {
+        if !seen.insert(std::ptr::from_ref(*item)) {
+            batches.push(start..index);
+            start = index;
+            seen.clear();
+            seen.insert(std::ptr::from_ref(*item));
+        }
+    }
+    if start < items.len() {
+        batches.push(start..items.len());
+    }
+    batches
+}
+
 /// A chunk of upload memory for lists' scratch data: the buffer, its
 /// mapping and its host GPU address.
 struct Chunk {
@@ -2283,9 +2331,13 @@ struct Deferred {
     /// descriptor heaps): the title may release its objects before it
     /// submits the list.
     kept: Vec<windows::core::IUnknown>,
+    /// Mesh fallback objects already held by this list.
+    mesh_kept: std::collections::HashSet<usize>,
     /// Buffer ranges refreshed since the last title copy (host copy,
     /// address, bytes): refreshing them again would find the same bytes.
     refreshed: std::collections::HashSet<(usize, usize, usize)>,
+    /// Coverage tracking for the mesh fallback host path.
+    refreshed_ranges: crate::refresh_coverage::RefreshCoverage,
     /// Textures whose contents the list brings up to date.
     textures: std::collections::HashSet<usize>,
     /// Bottom-of-pipe writes, done once the list has run: address, what,
@@ -4621,7 +4673,13 @@ impl Host {
     /// Runs closed lists and waits for them, and with [`late`] for
     /// everything sent to the card before them, which is settled first.
     pub(crate) fn execute(&self, runs: &[&HostList]) {
-        let _ = self.submit(runs, false);
+        if runs.len() <= 1 {
+            let _ = self.submit(runs, false);
+            return;
+        }
+        for range in unique_batches(runs) {
+            let _ = self.submit(&runs[range], false);
+        }
     }
 
     /// A queue's submission with [`late`]: the host lists `lists`, taken
@@ -4632,6 +4690,12 @@ impl Host {
     /// for reuse then, as a queue does for the lists it ran.
     pub(crate) fn execute_late(&self, lists: Vec<crate::list::Detached>, order: Vec<usize>) {
         if order.is_empty() {
+            crate::list::recycle(lists, &order);
+            return;
+        }
+        let runs: Vec<&HostList> = order.iter().map(|&i| lists[i].host()).collect();
+        if unique_batches(&runs).len() > 1 {
+            self.execute(&runs);
             crate::list::recycle(lists, &order);
             return;
         }
@@ -4799,12 +4863,19 @@ impl Host {
                     match self.fence.SetEventOnCompletion(*submitted, self.event) {
                         Ok(()) => {
                             working(false);
-                            WaitForSingleObject(self.event, INFINITE);
+                            let wait = WaitForSingleObject(self.event, INFINITE);
                             stood(waiting);
                             working(true);
+                            let completed = self.fence.GetCompletedValue();
+                            if !fence_wait_completed(wait.0, completed, *submitted) {
+                                fail(format_args!(
+                                    "waiting for submitted GPU work failed: wait={:#x}, completed={completed}, target={}",
+                                    wait.0, *submitted
+                                ));
+                            }
                         }
                         Err(e) => {
-                            tracing::warn!(error = %e, "submissions sent ahead not waited for")
+                            fail(format_args!("cannot wait for submissions sent ahead: {e}"))
                         }
                     }
                 }
@@ -5104,11 +5175,18 @@ impl Host {
                 match waited {
                     Ok(()) => {
                         working(false);
-                        WaitForSingleObject(self.event, INFINITE);
+                        let wait = WaitForSingleObject(self.event, INFINITE);
                         stood(started);
                         working(true);
+                        let completed = self.fence.GetCompletedValue();
+                        if !fence_wait_completed(wait.0, completed, *submitted) {
+                            fail(format_args!(
+                                "waiting for a host submission failed: wait={:#x}, completed={completed}, target={}",
+                                wait.0, *submitted
+                            ));
+                        }
                     }
-                    Err(e) => tracing::warn!(error = %e, "host submission not waited for"),
+                    Err(e) => fail(format_args!("cannot signal or wait for a host submission: {e}")),
                 }
             }
             // With timing on each group is one of `runs` (and the compare
@@ -6114,6 +6192,7 @@ impl HostList {
             .copies
             .push(Step::Copy(dst as usize, src as usize, len));
         deferred.refreshed.clear();
+        deferred.refreshed_ranges.clear();
     }
 
     /// Copies `len` bytes of title memory at `src` into the list's upload
@@ -6134,8 +6213,28 @@ impl HostList {
         len: usize,
     ) {
         let mut deferred = self.deferred();
-        let key = (std::sync::Arc::as_ptr(shadow) as usize, address, len);
-        if deferred.refreshed.insert(key) {
+        let key = std::sync::Arc::as_ptr(shadow) as usize;
+        static COVERAGE: OnceLock<bool> = OnceLock::new();
+        let coverage = *COVERAGE.get_or_init(|| host().is_some_and(|h| !h.mesh_shaders()));
+        let needed = if coverage {
+            deferred.refreshed_ranges.insert(key, address, len)
+        } else {
+            deferred.refreshed.insert((key, address, len))
+        };
+        #[cfg(feature = "diagnostics")]
+        if coverage {
+            REFRESH_COVERAGE[usize::from(!needed)].fetch_add(1, Ordering::Relaxed);
+            // Optional comparison to the original exact-range set. This
+            // costs memory and time and is for diagnosis, not frame timing.
+            static COMPARE: OnceLock<bool> = OnceLock::new();
+            if *COMPARE.get_or_init(|| std::env::var_os("VICTORY_COVERAGE_COMPARE").is_some_and(|v| v == "1")) {
+                let was_new = deferred.refreshed.insert((key, address, len));
+                if !needed && was_new {
+                    REFRESH_COVERAGE[2].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        if needed {
             deferred
                 .copies
                 .push(Step::Refresh(shadow.clone(), address, len));
@@ -6342,6 +6441,19 @@ impl HostList {
         }
     }
 
+    /// Keep an object once for the mesh fallback's repeated dispatches.
+    pub(crate) fn keep_mesh(&self, object: &impl Interface) {
+        let mut deferred = self.deferred();
+        let key = object.as_raw() as usize;
+        if deferred.mesh_kept.insert(key) {
+            if let Ok(object) = object.cast::<windows::core::IUnknown>() {
+                deferred.kept.push(object);
+            } else {
+                deferred.mesh_kept.remove(&key);
+            }
+        }
+    }
+
     /// Whether this is the first time since the reset that the list asks
     /// about `key` (a texture to bring up to date).
     pub(crate) fn first_use(&self, key: usize) -> bool {
@@ -6351,8 +6463,10 @@ impl HostList {
     /// Runs `work` when the list is submitted, in order with its copies.
     /// `work` may write title memory (refreshes after it copy again).
     pub(crate) fn defer(&self, work: impl Fn() + Send + 'static) {
-        self.deferred().copies.push(Step::Run(Box::new(work)));
-        self.deferred().refreshed.clear();
+        let mut deferred = self.deferred();
+        deferred.copies.push(Step::Run(Box::new(work)));
+        deferred.refreshed.clear();
+        deferred.refreshed_ranges.clear();
     }
 
     /// As [`HostList::defer`], for work that writes only host memory.
@@ -7746,6 +7860,27 @@ impl Meter {
         tracing::info!(
             "indirect mesh dispatches: the largest group count asked for {mesh_largest} (run: at most 65535), {mesh_groups:.0} groups asked per frame"
         );
+        let [direct, direct_ns, indirect_count, indirect_ns] = crate::draw::take_mesh_profile();
+        if direct + indirect_count > 0 {
+            tracing::info!(
+                direct_calls = direct,
+                direct_cpu_ms = direct_ns as f64 / 1e6,
+                indirect_calls = indirect_count,
+                indirect_cpu_ms = indirect_ns as f64 / 1e6,
+                frames,
+                "mesh fallback CPU recording time"
+            );
+        }
+        for (pipeline, [direct, indirect]) in crate::draw::take_mesh_hotspots() {
+            tracing::info!(pipeline, direct, indirect, frames, "mesh fallback pipeline calls");
+        }
+        #[cfg(feature = "diagnostics")]
+        {
+            let [queued, covered, additional_if_compared] = REFRESH_COVERAGE.each_ref().map(|count| count.swap(0, Ordering::Relaxed));
+            if queued + covered != 0 {
+                tracing::info!(queued, covered, additional_if_compared, frames, "mesh fallback buffer refresh requests");
+            }
+        }
         late_line(frames);
         card_clock_line(frames, ms);
         crate::shadow::back_line(frames);
@@ -8556,6 +8691,23 @@ mod spare {
     use super::{BUFFER_WRITE, Spare, host};
     use windows::core::Interface;
 
+    #[test]
+    fn a_fence_wait_requires_success_and_a_completed_target() {
+        assert!(super::fence_wait_completed(0, 7, 7));
+        assert!(super::fence_wait_completed(0, 8, 7));
+        assert!(!super::fence_wait_completed(u32::MAX, 7, 7));
+        assert!(!super::fence_wait_completed(0, 6, 7));
+        assert!(!super::fence_wait_completed(0, u64::MAX, 7));
+    }
+
+    #[test]
+    fn repeated_lists_preserve_order_across_batches() {
+        let (a, b, c) = (1, 2, 3);
+        assert_eq!(super::unique_batches(&[&a, &b, &a, &c, &b]), [0..2, 2..5]);
+        assert!(super::unique_batches::<u32>(&[]).is_empty());
+        assert_eq!(super::unique_batches(&[&a, &a, &a]), [0..1, 1..2, 2..3]);
+    }
+
     /// Kept things come back by size, the last given first, and nothing is
     /// kept past the limit.
     #[test]
@@ -8645,6 +8797,24 @@ mod spare {
         second.close();
         host.execute(&[&second]);
         eprintln!("mesh scratch reused on a second submitted D3D12 list");
+    }
+
+    #[test]
+    fn mesh_keeps_each_object_until_list_reset() {
+        let Some(host) = host() else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        let list = host.new_list().unwrap();
+        let buffer = host.uav_buffer(65536).unwrap();
+        let before = super::references(&buffer);
+        list.keep_mesh(&buffer);
+        list.keep_mesh(&buffer);
+        assert_eq!(super::references(&buffer), before + 1);
+        list.close();
+        host.execute(&[&list]);
+        list.reset();
+        assert_eq!(super::references(&buffer), before);
     }
 }
 

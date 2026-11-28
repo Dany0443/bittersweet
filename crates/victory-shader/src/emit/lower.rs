@@ -78,6 +78,23 @@ const MESH_VERTICES: u8 = 0;
 const MESH_INDICES: u8 = 1;
 const MESH_PRIMITIVES: u8 = 2;
 
+/// A mesh group's original v5 is the same in every compute lane. Keep the
+/// general wave operation for guarded reads and all other input values.
+pub(super) fn mesh_group_read_is_uniform(
+    mesh_as_compute: bool,
+    guarded: bool,
+    value: Option<Value>,
+    io: &Io,
+) -> bool {
+    mesh_as_compute
+        && !guarded
+        && value.is_some_and(|value| {
+            io.inputs
+                .iter()
+                .any(|&(input, kind)| input == value && kind == Input::MeshGroup)
+        })
+}
+
 pub(crate) struct Parts<'a> {
     pub native: &'a NativeProgram,
     pub p: &'a Program,
@@ -455,6 +472,10 @@ pub(super) const MASK_ELSEWHERE: Why = "a lane mask holding lanes elsewhere read
 /// Per IR block: every lane of the wave that started the program runs it – no per-lane branch
 /// separates it from the entry (it lies in no lane branch's region: the blocks reachable from
 /// the branch that do not post-dominate it). None with an indirect exit (not followed).
+fn clamp_mesh_outputs(mesh_as_compute: bool, fits: bool) -> bool {
+    !mesh_as_compute && !fits
+}
+
 fn all_lane_blocks(st: &Structured) -> Option<Vec<bool>> {
     let n = st.exits.len();
     let mut all = vec![true; n];
@@ -4545,7 +4566,7 @@ impl<'a> Lower<'a> {
         };
         // As compute the outputs are plain buffers with no such cap, and the
         // record strides must stay the declared maxima `MeshLayout` reports.
-        if !self.x.mesh_as_compute && !fits(mesh) {
+        if clamp_mesh_outputs(self.x.mesh_as_compute, fits(mesh)) {
             mesh.max_vertices = mesh.max_vertices.min(threads);
             mesh.max_primitives = mesh.max_primitives.min(threads);
             // shortcut: outputs past the cap even at the lane count are
@@ -8376,6 +8397,23 @@ impl<'a> Lower<'a> {
                 let is = self.s.m.cmp(c, pred::EQ, me, lane);
                 let r = self.s.m.select(c, is, a, old);
                 int(self, r)
+            }
+            "v_readfirstlane_b32"
+                if v.dpp.is_none()
+                    && v.sdwa.is_none()
+                    && mesh_group_read_is_uniform(
+                        self.x.mesh_as_compute,
+                        guard.is_some(),
+                        match v.src.first() {
+                            Some(&Operand::Vector { reg, .. }) => inst.read(Reg::V(reg)),
+                            _ => None,
+                        },
+                        self.x.io,
+                    ) =>
+            {
+                // The workgroup ID and stride are identical in every lane.
+                let a = s(self, 0)?;
+                int(self, a)
             }
             "v_readfirstlane_b32"
                 if inst
@@ -12362,6 +12400,12 @@ fn interp_mode(kind: Barycentric) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compute_mesh_keeps_its_output_layout_beyond_native_limit() {
+        assert!(!super::clamp_mesh_outputs(true, false));
+        assert!(super::clamp_mesh_outputs(false, false));
+        assert!(!super::clamp_mesh_outputs(false, true));
+    }
 
     fn lower_ps(words: &[u32]) -> Result<Lowered, crate::ShaderError> {
         let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();

@@ -24,6 +24,103 @@ use crate::host::HostList;
 use crate::object::This;
 use crate::pipeline::host::HostPipeline;
 
+// Optional CPU recording-time measurements for the emulated mesh path.
+static MESH_PROFILE: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+// Separate from timing because locking on every draw distorts the timings.
+// This is opt-in and counts pipeline names, including their pixel shader.
+static MESH_HOTSPOTS: std::sync::Mutex<Option<std::collections::HashMap<String, [u64; 2]>>> =
+    std::sync::Mutex::new(None);
+
+fn mesh_hotspot(name: &str, indirect: bool) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| {
+        std::env::var_os("VICTORY_MESH_HOTSPOTS").is_some_and(|v| v == "1")
+    }) {
+        return;
+    }
+    let mut counts = MESH_HOTSPOTS.lock().unwrap_or_else(|e| e.into_inner());
+    let counts = counts.get_or_insert_with(Default::default);
+    count_mesh_hotspot(counts, name, indirect);
+}
+
+fn count_mesh_hotspot(counts: &mut std::collections::HashMap<String, [u64; 2]>, name: &str, indirect: bool) {
+    if let Some(count) = counts.get_mut(name) {
+        count[usize::from(indirect)] += 1;
+    } else {
+        let mut count = [0, 0];
+        count[usize::from(indirect)] = 1;
+        counts.insert(name.to_owned(), count);
+    }
+}
+
+#[test]
+fn mesh_hotspot_counts_direct_and_indirect_by_pipeline() {
+    let mut counts = std::collections::HashMap::new();
+    count_mesh_hotspot(&mut counts, "mesh-a", false);
+    count_mesh_hotspot(&mut counts, "mesh-a", true);
+    count_mesh_hotspot(&mut counts, "mesh-a", true);
+    count_mesh_hotspot(&mut counts, "mesh-b", true);
+    assert_eq!(counts["mesh-a"], [1, 2]);
+    assert_eq!(counts["mesh-b"], [0, 1]);
+}
+
+pub(crate) fn take_mesh_hotspots() -> Vec<(String, [u64; 2])> {
+    let mut counts = MESH_HOTSPOTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut entries: Vec<_> = counts.as_mut().map(|c| c.drain().collect()).unwrap_or_default();
+    entries.sort_unstable_by_key(|(_, counts)| std::cmp::Reverse(counts[0] + counts[1]));
+    entries.truncate(10);
+    entries
+}
+
+struct MeshProfile {
+    started: Option<std::time::Instant>,
+    index: usize,
+}
+
+impl MeshProfile {
+    fn start(index: usize) -> Self {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let enabled = *ENABLED.get_or_init(|| {
+            std::env::var_os("VICTORY_MESH_PROFILE").is_some_and(|v| v == "1")
+        });
+        Self {
+            started: enabled.then(std::time::Instant::now),
+            index,
+        }
+    }
+}
+
+impl Drop for MeshProfile {
+    fn drop(&mut self) {
+        if let Some(started) = self.started {
+            MESH_PROFILE[self.index].fetch_add(1, Ordering::Relaxed);
+            MESH_PROFILE[self.index + 1]
+                .fetch_add(started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64, Ordering::Relaxed);
+        }
+    }
+}
+
+pub(crate) fn take_mesh_profile() -> [u64; 4] {
+    std::array::from_fn(|i| MESH_PROFILE[i].swap(0, Ordering::Relaxed))
+}
+
+fn bind_pipeline<'a, T>(normal: &'a T, mesh_compute: Option<&'a T>, compute: bool) -> &'a T {
+    if compute {
+        mesh_compute.unwrap_or(normal)
+    } else {
+        normal
+    }
+}
+
+#[test]
+fn bind_pipeline_selects_mesh_compute_only_for_compute_binding() {
+    assert_eq!(*bind_pipeline(&1, Some(&2), true), 2);
+    assert_eq!(*bind_pipeline(&1, Some(&2), false), 1);
+    assert_eq!(*bind_pipeline(&1, None, true), 1);
+    assert_eq!(*bind_pipeline(&1, None, false), 1);
+}
+
 /// A root argument as the title set it.
 #[derive(Debug, Clone, Default)]
 enum Root {
@@ -968,13 +1065,18 @@ impl State {
         }
         // By host object: a title pipeline released and another made at its
         // address is another host pipeline (the list keeps the old one).
-        if self.host_pipeline != p.pso.as_raw() as usize {
+        let pipeline = bind_pipeline(
+            &p.pso,
+            p.fallback.as_ref().map(|fallback| &fallback.compute),
+            compute,
+        );
+        if self.host_pipeline != pipeline.as_raw() as usize {
             // SAFETY: an open list and a live pipeline.
-            unsafe { l.SetPipelineState(&p.pso) };
-            self.host_pipeline = p.pso.as_raw() as usize;
+            unsafe { l.SetPipelineState(pipeline) };
+            self.host_pipeline = pipeline.as_raw() as usize;
             list.used_pipeline(&p.name);
             // The title may release the pipeline before it submits the list.
-            list.keep(&p.pso);
+            list.keep(pipeline);
             list.keep(&p.root);
         }
         for stage in &p.stages {
@@ -2182,6 +2284,8 @@ impl State {
 
     fn dispatch_mesh_fallback(&mut self, list: &HostList, p: &HostPipeline,
         fallback: &crate::pipeline::host::MeshFallback, groups: u32) -> bool {
+        let _profile = MeshProfile::start(0);
+        mesh_hotspot(&p.name, false);
         if groups == 0 { return true; }
         if groups > 65_535 {
             once!(groups, "mesh fallback dispatch exceeds the host's 65,535 group limit and is clamped");
@@ -2197,14 +2301,12 @@ impl State {
             return false;
         }
         let Some(buffer) = list.mesh_scratch(size) else { return false };
-        list.keep(&buffer);
-        list.keep(&fallback.compute);
+        list.keep_mesh(&buffer);
+        list.keep_mesh(&fallback.compute);
         list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
         let base = unsafe { buffer.GetGPUVirtualAddress() };
         unsafe {
-            list.list.SetPipelineState(&fallback.compute);
-            self.host_pipeline = fallback.compute.as_raw() as usize;
             for (parameter, offset) in fallback.outputs.into_iter().zip([0, at_indices, at_primitives]) {
                 list.list.SetComputeRootUnorderedAccessView(parameter, base + offset);
             }
@@ -2233,7 +2335,6 @@ impl State {
         }
         self.mesh_scissor(list, false);
         self.set_topology(list, self.topology);
-        list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
         DRAWN.fetch_add(1, Ordering::Relaxed);
         true
     }
@@ -2250,9 +2351,9 @@ impl State {
     /// Present that state as compute roots while binding the translated mesh
     /// stage, then restore the title's independent compute state.
     fn bind_mesh_fallback_compute(&mut self, list: &HostList, p: &HostPipeline) -> bool {
-        let saved = std::mem::replace(&mut self.compute, self.graphics.clone());
+        std::mem::swap(&mut self.compute, &mut self.graphics);
         let bound = self.bind(list, p, true);
-        self.compute = saved;
+        std::mem::swap(&mut self.compute, &mut self.graphics);
         bound
     }
 
@@ -2960,6 +3061,8 @@ impl State {
         fallback: &crate::pipeline::host::MeshFallback,
         (stride, max, arguments, count): (u32, u32, u64, Option<u64>)) -> bool {
         use crate::mesh_indirect::{COMPUTE_STRIDE, draw_stride};
+        let _profile = MeshProfile::start(2);
+        mesh_hotspot(&p.name, true);
         if max == 0 {
             return true;
         }
@@ -2992,11 +3095,11 @@ impl State {
         // The mesh converter overwrites the same scratch used by the
         // ordinary argument clamp, invalidating any cached records.
         self.window = None;
-        list.keep(&data);
-        list.keep(&commands);
-        list.keep(&fallback.compute);
-        list.keep(&signatures.compute);
-        list.keep(&signatures.draw);
+        list.keep_mesh(&data);
+        list.keep_mesh(&commands);
+        list.keep_mesh(&fallback.compute);
+        list.keep_mesh(&signatures.compute);
+        list.keep_mesh(&signatures.draw);
         let data_gpu = unsafe { data.GetGPUVirtualAddress() };
         let command_gpu = unsafe { commands.GetGPUVirtualAddress() };
         list.begin_command();
@@ -3016,8 +3119,6 @@ impl State {
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
         list.buffer_state(&data, crate::host::BUFFER_WRITE);
         unsafe {
-            list.list.SetPipelineState(&fallback.compute);
-            self.host_pipeline = fallback.compute.as_raw() as usize;
             list.list.ExecuteIndirect(&signatures.compute, records, &commands, 0, None, 0);
         }
         list.begin_command();
@@ -3039,8 +3140,6 @@ impl State {
         }
         self.mesh_scissor(list, false);
         self.set_topology(list, self.topology);
-        list.buffer_state(&data, crate::host::BUFFER_WRITE);
-        list.buffer_state(&commands, crate::host::BUFFER_WRITE);
         DRAWN.fetch_add(1, Ordering::Relaxed);
         true
     }

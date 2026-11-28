@@ -523,6 +523,32 @@ The conversion, dispatch and draw each advance buffer state tracking at
 their command boundaries. A compiler-only regression test exercises Wine's
 HLSL compiler without creating a GPU device.
 
+Mesh fallback recording-time profiling was added locally to measure direct
+and indirect command preparation on the Linux host.
+Optional per-pipeline call counts were added locally to identify candidates
+for future mesh translation work; they are disabled unless requested.
+The fallback temporarily swaps its root state locally to avoid cloning
+graphics root constants on every mesh dispatch.
+Repeated host command lists are submitted in ordered, completed batches
+to protect their reused prelude allocators. This is a local correction.
+Empty synchronous submissions retain their prior settling behavior.
+Host submission waits now require a completed fence before resources
+are retired. This is a local correction.
+Mesh scratch transitions back to write state on its next use. This local
+change avoids transitions after the last mesh draw in a command list.
+Mesh fallback binding selects its compute pipeline directly. This local
+change avoids an extra graphics pipeline bind before each compute pass.
+Mesh fallback lists retain each scratch buffer and command signature once
+until reset, avoiding repeated references during indirect draws.
+Lists on hosts without mesh shaders also avoid repeated buffer refreshes
+already covered by earlier ranges. This change was developed locally.
+The compute fallback avoids a first-lane read of the workgroup-uniform mesh
+group input. This local optimization keeps native mesh translation unchanged.
+
+The compute fallback retains its declared output layout even when native
+mesh output limits would require smaller counts. This local fix follows
+the runtime's existing mesh scratch layout.
+
 ### Mesh fallback register spaces
 
 Adapted the separate compute binding spaces from Marvisak/VIctory
