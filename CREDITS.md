@@ -514,6 +514,8 @@ Host submission waits now require a completed fence before resources
 are retired. This is a local correction.
 Mesh scratch transitions back to write state on its next use. This local
 change avoids transitions after the last mesh draw in a command list.
+Mesh fallback binding selects its compute pipeline directly. This local
+change avoids an extra graphics pipeline bind before each compute pass.
 
 The compute fallback retains its declared output layout even when native
 mesh output limits would require smaller counts. This local fix follows

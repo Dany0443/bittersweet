@@ -59,6 +59,22 @@ pub(crate) fn take_mesh_profile() -> [u64; 4] {
     std::array::from_fn(|i| MESH_PROFILE[i].swap(0, Ordering::Relaxed))
 }
 
+fn bind_pipeline<'a, T>(normal: &'a T, mesh_compute: Option<&'a T>, compute: bool) -> &'a T {
+    if compute {
+        mesh_compute.unwrap_or(normal)
+    } else {
+        normal
+    }
+}
+
+#[test]
+fn bind_pipeline_selects_mesh_compute_only_for_compute_binding() {
+    assert_eq!(*bind_pipeline(&1, Some(&2), true), 2);
+    assert_eq!(*bind_pipeline(&1, Some(&2), false), 1);
+    assert_eq!(*bind_pipeline(&1, None, true), 1);
+    assert_eq!(*bind_pipeline(&1, None, false), 1);
+}
+
 /// A root argument as the title set it.
 #[derive(Debug, Clone, Default)]
 enum Root {
@@ -990,13 +1006,18 @@ impl State {
         }
         // By host object: a title pipeline released and another made at its
         // address is another host pipeline (the list keeps the old one).
-        if self.host_pipeline != p.pso.as_raw() as usize {
+        let pipeline = bind_pipeline(
+            &p.pso,
+            p.fallback.as_ref().map(|fallback| &fallback.compute),
+            compute,
+        );
+        if self.host_pipeline != pipeline.as_raw() as usize {
             // SAFETY: an open list and a live pipeline.
-            unsafe { l.SetPipelineState(&p.pso) };
-            self.host_pipeline = p.pso.as_raw() as usize;
+            unsafe { l.SetPipelineState(pipeline) };
+            self.host_pipeline = pipeline.as_raw() as usize;
             list.used_pipeline(&p.name);
             // The title may release the pipeline before it submits the list.
-            list.keep(&p.pso);
+            list.keep(pipeline);
             list.keep(&p.root);
         }
         for stage in &p.stages {
@@ -2143,8 +2164,6 @@ impl State {
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
         let base = unsafe { buffer.GetGPUVirtualAddress() };
         unsafe {
-            list.list.SetPipelineState(&fallback.compute);
-            self.host_pipeline = fallback.compute.as_raw() as usize;
             for (parameter, offset) in fallback.outputs.into_iter().zip([0, at_indices, at_primitives]) {
                 list.list.SetComputeRootUnorderedAccessView(parameter, base + offset);
             }
@@ -2956,8 +2975,6 @@ impl State {
         if !self.bind_mesh_fallback_compute(list, p) { return false; }
         list.buffer_state(&data, crate::host::BUFFER_WRITE);
         unsafe {
-            list.list.SetPipelineState(&fallback.compute);
-            self.host_pipeline = fallback.compute.as_raw() as usize;
             list.list.ExecuteIndirect(&signatures.compute, records, &commands, 0, None, 0);
         }
         list.begin_command();
