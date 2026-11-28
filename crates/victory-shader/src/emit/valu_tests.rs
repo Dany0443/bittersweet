@@ -521,6 +521,26 @@ fn run_cases_on(
     assert!(ran > 0, "no SM 6.6 device available ({devices:?})");
 }
 
+#[test]
+fn sdwa_half_write_places_and_extends_the_result() {
+    for (word, unused, expected) in [
+        (4, 0, 0x0000_ffff),
+        (4, 1, 0xffff_ffff),
+        (4, 2, 0xabcd_ffff),
+        (5, 1, 0xffff_0000),
+        (5, 2, 0xffff_1234),
+    ] {
+        let shader = build_valu_cs(&[
+            vop1(1, 0, vgpr(4)),
+            vop1(0x53, 0, 0xf9),
+            1 | (word << 8) | (unused << 11) | (4 << 16),
+        ]);
+        run_cases(&shader, &[[0xbc00, 0, 0, 0xabcd_1234]], |backend, _, _, got| {
+            assert_eq!(got, expected, "{backend}: SDWA word {word}, unused {unused}");
+        });
+    }
+}
+
 fn is_f16_nan(bits: u16) -> bool {
     (bits & 0x7FFF) > 0x7C00
 }

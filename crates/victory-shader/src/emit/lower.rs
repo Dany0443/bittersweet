@@ -8851,35 +8851,14 @@ impl<'a> Lower<'a> {
         let Some(Operand::Vector { reg, .. }) = v.dst else {
             return Err("a 16-bit result outside a VGPR");
         };
-        let mut high = v.opsel >> 3 & 1 != 0;
-        // SDWA: the word written, the other one kept (preserve) or zero
-        // (pad; a sign extension above the high word adds nothing).
-        let mut keep = true;
-        if let Some(sd) = v.sdwa {
-            match (sd.dst_sel, sd.dst_unused) {
-                (4, 2) => {}
-                (5, 2) => high = true,
-                (4 | 6, _) => keep = false,
-                (5, _) => (high, keep) = (true, false),
-                _ => return Err("an SDWA destination of a 16-bit operation"),
-            }
-        }
-        let c = self.cur;
-        let old = match inst.read(Reg::V(reg)).map(|o| self.i32_of(o)) {
-            Some(Ok(o)) if keep => o,
-            _ => self.s.m.i32(0),
+        let word = 4 + (v.opsel >> 3 & 1);
+        let (sel, unused) = match v.sdwa.map(|sd| (sd.dst_sel, sd.dst_unused)) {
+            None => (word, 2),
+            Some((sel @ 4..=5, unused @ 0..=2)) => (sel, unused),
+            Some((6, 0..=2)) => (word, 0),
+            _ => return Err("an SDWA destination of a 16-bit operation"),
         };
-        let (k16, low) = (self.s.m.i32(16), self.s.m.i32(0xFFFF));
-        let x = self.s.m.bin(c, Bin::And, x, low);
-        let r = if high {
-            let o = self.s.m.bin(c, Bin::And, old, low);
-            let x = self.s.m.bin(c, Bin::Shl, x, k16);
-            self.s.m.bin(c, Bin::Or, o, x)
-        } else {
-            let keep = self.s.m.i32(0xFFFF_0000);
-            let o = self.s.m.bin(c, Bin::And, old, keep);
-            self.s.m.bin(c, Bin::Or, o, x)
-        };
+        let r = self.place_bits(inst, Reg::V(reg), x, sel, unused);
         self.write_placed(inst, Reg::V(reg), r, guard);
         Ok(())
     }
