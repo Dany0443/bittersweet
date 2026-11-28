@@ -510,6 +510,7 @@ The fallback temporarily swaps its root state locally to avoid cloning
 graphics root constants on every mesh dispatch.
 Repeated host command lists are submitted in ordered, completed batches
 to protect their reused prelude allocators. This is a local correction.
+Empty synchronous submissions retain their prior settling behavior.
 Host submission waits now require a completed fence before resources
 are retired. This is a local correction.
 Mesh scratch transitions back to write state on its next use. This local

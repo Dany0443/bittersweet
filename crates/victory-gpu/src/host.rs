@@ -4639,6 +4639,10 @@ impl Host {
     /// Runs closed lists and waits for them, and with [`late`] for
     /// everything sent to the card before them, which is settled first.
     pub(crate) fn execute(&self, runs: &[&HostList]) {
+        if runs.len() <= 1 {
+            let _ = self.submit(runs, false);
+            return;
+        }
         for range in unique_batches(runs) {
             let _ = self.submit(&runs[range], false);
         }
