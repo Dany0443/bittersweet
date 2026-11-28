@@ -573,6 +573,10 @@ pub(crate) fn fail(what: std::fmt::Arguments) -> ! {
     }
 }
 
+fn fence_wait_completed(wait_result: u32, completed: u64, target: u64) -> bool {
+    wait_result == 0 && completed != u64::MAX && completed >= target
+}
+
 /// The host GPU, created on first use; `None` without one (a run then
 /// behaves as before: nothing executes).
 pub(crate) fn host() -> Option<&'static Host> {
@@ -4798,12 +4802,19 @@ impl Host {
                     match self.fence.SetEventOnCompletion(*submitted, self.event) {
                         Ok(()) => {
                             working(false);
-                            WaitForSingleObject(self.event, INFINITE);
+                            let wait = WaitForSingleObject(self.event, INFINITE);
                             stood(waiting);
                             working(true);
+                            let completed = self.fence.GetCompletedValue();
+                            if !fence_wait_completed(wait.0, completed, *submitted) {
+                                fail(format_args!(
+                                    "waiting for submitted GPU work failed: wait={:#x}, completed={completed}, target={}",
+                                    wait.0, *submitted
+                                ));
+                            }
                         }
                         Err(e) => {
-                            tracing::warn!(error = %e, "submissions sent ahead not waited for")
+                            fail(format_args!("cannot wait for submissions sent ahead: {e}"))
                         }
                     }
                 }
@@ -5103,11 +5114,18 @@ impl Host {
                 match waited {
                     Ok(()) => {
                         working(false);
-                        WaitForSingleObject(self.event, INFINITE);
+                        let wait = WaitForSingleObject(self.event, INFINITE);
                         stood(started);
                         working(true);
+                        let completed = self.fence.GetCompletedValue();
+                        if !fence_wait_completed(wait.0, completed, *submitted) {
+                            fail(format_args!(
+                                "waiting for a host submission failed: wait={:#x}, completed={completed}, target={}",
+                                wait.0, *submitted
+                            ));
+                        }
                     }
-                    Err(e) => tracing::warn!(error = %e, "host submission not waited for"),
+                    Err(e) => fail(format_args!("cannot signal or wait for a host submission: {e}")),
                 }
             }
             // With timing on each group is one of `runs` (and the compare
@@ -8442,6 +8460,15 @@ mod trail {
 mod spare {
     use super::{BUFFER_WRITE, Spare, host};
     use windows::core::Interface;
+
+    #[test]
+    fn a_fence_wait_requires_success_and_a_completed_target() {
+        assert!(super::fence_wait_completed(0, 7, 7));
+        assert!(super::fence_wait_completed(0, 8, 7));
+        assert!(!super::fence_wait_completed(u32::MAX, 7, 7));
+        assert!(!super::fence_wait_completed(0, 6, 7));
+        assert!(!super::fence_wait_completed(0, u64::MAX, 7));
+    }
 
     #[test]
     fn repeated_lists_preserve_order_across_batches() {

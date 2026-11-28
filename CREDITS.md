@@ -510,6 +510,8 @@ The fallback temporarily swaps its root state locally to avoid cloning
 graphics root constants on every mesh dispatch.
 Repeated host command lists are submitted in ordered, completed batches
 to protect their reused prelude allocators. This is a local correction.
+Host submission waits now require a completed fence before resources
+are retired. This is a local correction.
 
 The compute fallback retains its declared output layout even when native
 mesh output limits would require smaller counts. This local fix follows
