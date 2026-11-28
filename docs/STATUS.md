@@ -68,6 +68,14 @@ of free swap. The monitor stopped it after 47 seconds with 251 MiB of RAM
 available and no free swap. It produced no world sample, so the fix's
 effect on game visuals remains unverified.
 
+Two RX 7600 runs used the same warmed build at 1280 by 720 internal
+resolution. At the first upscale the pool had created five transition
+command lists, compared with 17 with pooling disabled. The memory
+monitor stopped the runs after 53 and 45 seconds. The disabled run also
+logged a RADV GPU virtual-memory fault. It started with less free swap.
+Neither run produced enough world frames to measure gameplay speed or
+establish whether pooling affects device stability.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
