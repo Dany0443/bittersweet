@@ -507,6 +507,10 @@ HLSL compiler without creating a GPU device.
 Mesh fallback recording-time profiling was added locally to measure direct
 and indirect command preparation on the Linux host.
 
+The compute fallback retains its declared output layout even when native
+mesh output limits would require smaller counts. This local fix follows
+the runtime's existing mesh scratch layout.
+
 ### Mesh fallback register spaces
 
 Adapted the separate compute binding spaces from Marvisak/VIctory

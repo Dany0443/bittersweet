@@ -455,6 +455,10 @@ pub(super) const MASK_ELSEWHERE: Why = "a lane mask holding lanes elsewhere read
 /// Per IR block: every lane of the wave that started the program runs it – no per-lane branch
 /// separates it from the entry (it lies in no lane branch's region: the blocks reachable from
 /// the branch that do not post-dominate it). None with an indirect exit (not followed).
+fn clamp_mesh_outputs(mesh_as_compute: bool, fits: bool) -> bool {
+    !mesh_as_compute && !fits
+}
+
 fn all_lane_blocks(st: &Structured) -> Option<Vec<bool>> {
     let n = st.exits.len();
     let mut all = vec![true; n];
@@ -4545,7 +4549,7 @@ impl<'a> Lower<'a> {
         };
         // As compute the outputs are plain buffers with no such cap, and the
         // record strides must stay the declared maxima `MeshLayout` reports.
-        if !self.x.mesh_as_compute && !fits(mesh) {
+        if clamp_mesh_outputs(self.x.mesh_as_compute, fits(mesh)) {
             mesh.max_vertices = mesh.max_vertices.min(threads);
             mesh.max_primitives = mesh.max_primitives.min(threads);
             // shortcut: outputs past the cap even at the lane count are
@@ -12383,6 +12387,12 @@ fn interp_mode(kind: Barycentric) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compute_mesh_keeps_its_output_layout_beyond_native_limit() {
+        assert!(!super::clamp_mesh_outputs(true, false));
+        assert!(super::clamp_mesh_outputs(false, false));
+        assert!(!super::clamp_mesh_outputs(false, true));
+    }
 
     fn lower_ps(words: &[u32]) -> Result<Lowered, crate::ShaderError> {
         let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
