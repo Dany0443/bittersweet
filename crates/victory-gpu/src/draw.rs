@@ -1432,10 +1432,7 @@ impl State {
                 sweep.remove(index);
                 continue;
             };
-            let Some(view) = host.mirror(index, handle, true) else {
-                sweep.remove(index);
-                continue;
-            };
+            let binding = host.mirror_indexed_buffer(index, handle);
             // Every 64 views while the device lives (a cheap query).
             if alive
                 && n % 64 == 63
@@ -1457,9 +1454,7 @@ impl State {
                 );
                 crate::host::log_removal_context();
             }
-            // The copy the slot shows (`buffer_copy`), not the one the
-            // view's range alone would find.
-            let Some((shadow, address, len)) = crate::descriptor::host::buffer_copy(&view) else {
+            let Some((shadow, address, len)) = binding else {
                 sweep.remove(index);
                 continue;
             };

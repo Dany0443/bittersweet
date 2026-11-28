@@ -5,7 +5,8 @@
 //! writes it (view creation and descriptor copies) and again when a draw
 //! reads it through a table and finds the slot changed.
 
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
@@ -28,11 +29,8 @@ pub(crate) struct HostHeap {
     sampler: bool,
     /// The record (view index and generation) each slot was last made from.
     made: Mutex<Vec<u64>>,
-    /// The host resource each slot views, held while the slot does: shaders
-    /// index heaps directly, so a slot the title has not rewritten since it
-    /// released the resource may still be read, and a freed host resource
-    /// read there is a GPU page fault (the console reads stale memory).
-    kept: Mutex<Vec<Option<ID3D12Resource>>>,
+    /// Resources held by resident slots, including the bound buffer copies.
+    kept: Mutex<HashMap<u32, Binding>>,
     /// Where the search for free dynamic slots starts, and which are taken
     /// (by lists not yet reset).
     next: Mutex<(u32, Vec<bool>)>,
@@ -761,7 +759,7 @@ impl HostHeap {
             dynamic: extra,
             sampler,
             made: Mutex::new(vec![0; count as usize]),
-            kept: Mutex::new(vec![None; (count + extra) as usize]),
+            kept: Mutex::default(),
             next: Mutex::new((0, vec![false; DYNAMIC as usize])),
             free: std::sync::atomic::AtomicU32::new(DYNAMIC),
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
@@ -1409,7 +1407,7 @@ impl HostHeap {
         if kept.is_none() {
             null_for(view, self.cpu(index));
         }
-        self.keep(index, kept.flatten());
+        self.keep(index, kept.flatten().map(|binding| binding._resource.into()));
     }
 
     /// Makes slot `index` read nothing: a null view, or a plain sampler.
@@ -1423,14 +1421,19 @@ impl HostHeap {
     }
 
     /// Slot `index` now views `resource` (or nothing of the host's).
-    fn keep(&self, index: u32, resource: Option<ID3D12Resource>) {
-        let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = kept.get_mut(index as usize) {
-            // A running submission may still read the old resource through
-            // this slot.
-            if let Some(old) = std::mem::replace(slot, resource) {
-                crate::host::retire(old);
+    fn keep(&self, index: u32, binding: Option<Binding>) {
+        if index >= self.count + self.dynamic {
+            return;
+        }
+        let old = {
+            let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+            match binding {
+                Some(binding) => kept.insert(index, binding),
+                None => kept.remove(&index),
             }
+        };
+        if let Some(old) = old {
+            crate::host::retire(old);
         }
     }
 
@@ -1459,7 +1462,7 @@ impl HostHeap {
             host.device
                 .CreateShaderResourceView(buffer, Some(&desc), self.cpu(index))
         };
-        self.keep(index, Some(buffer.clone()));
+        self.keep(index, Some(buffer.clone().into()));
     }
 
     /// Makes slot `index` (a dynamic one) a raw buffer view that reads
@@ -1498,7 +1501,7 @@ impl HostHeap {
                 self.cpu(index),
             )
         };
-        self.keep(index, Some(buffer.clone()));
+        self.keep(index, Some(buffer.clone().into()));
     }
 
     /// Makes slot `index` (a dynamic one) a raw unordered access view of
@@ -1564,6 +1567,35 @@ impl HostHeap {
     /// views are made only for draws (`for_draw`), which also copy their
     /// data: a host copy of a buffer is made on first use.
     pub(crate) fn mirror(&self, index: u32, handle: u64, for_draw: bool) -> Option<View> {
+        self.mirror_with(index, handle, for_draw, |view| view)
+    }
+
+    /// Capture the bound copy and its view range under the descriptor lock.
+    pub(crate) fn mirror_indexed_buffer(
+        &self,
+        index: u32,
+        handle: u64,
+    ) -> Option<(Arc<crate::shadow::Shadow>, u64, u64)> {
+        self.mirror_with(index, handle, true, |view| {
+            if !view_extent() {
+                return buffer_copy(&view);
+            }
+            let (address, len) = buffer_range(&view)?;
+            let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+            let shadow = kept.get(&index)?.shadow.as_ref()?;
+            shadow.offset_in(address)?;
+            let len = len.min(shadow.left(address));
+            (len != 0).then(|| (shadow.clone(), address, len))
+        })?
+    }
+
+    fn mirror_with<T>(
+        &self,
+        index: u32,
+        handle: u64,
+        for_draw: bool,
+        use_view: impl FnOnce(View) -> T,
+    ) -> Option<T> {
         if index >= self.count {
             // Diagnostic (NVIDIA heap cap): the highest title slot past the
             // host heap seen so far.
@@ -1628,7 +1660,7 @@ impl HostHeap {
                     .is_some_and(|old| same_placed_texture(&old, &view))
             {
                 KEPT_VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                return Some(view);
+                return Some(use_view(view));
             }
             made[index as usize] = if later { 0 } else { key };
             let kept = if later {
@@ -1641,7 +1673,7 @@ impl HostHeap {
             }
             self.keep(index, kept.flatten());
         }
-        Some(view)
+        Some(use_view(view))
     }
 
     /// Whether host slot `index` shows `buffer`; `None` if it shows no
@@ -1650,7 +1682,7 @@ impl HostHeap {
     #[cfg(feature = "diagnostics")]
     pub(crate) fn shows(&self, index: u32, buffer: &ID3D12Resource) -> Option<bool> {
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
-        let shown = kept.get(index as usize)?.as_ref()?;
+        let shown = &kept.get(&index)?._resource;
         Some(windows::core::Interface::as_raw(shown) == windows::core::Interface::as_raw(buffer))
     }
 
@@ -1662,8 +1694,7 @@ impl HostHeap {
         self.kept
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(index as usize)
-            .is_some_and(Option::is_some)
+            .contains_key(&index)
     }
 
     #[cfg(feature = "diagnostics")]
@@ -1804,14 +1835,8 @@ fn view_extent() -> bool {
 /// The host copy buffer view `view` reads, and the title range (address,
 /// bytes) it reads there; `None` for other views and empty ranges.
 ///
-/// The copy is the one the view's slot shows: [`make`] finds it by the
-/// whole buffer the view is of ([`buffer_extent`]). Looked up by the range
-/// the view reads, as it was, the copy is another one wherever the two
-/// lookups differ: for memory outside buffer objects, a view of a part of a
-/// buffer that crosses a window line (the buffer's window is two cells, the
-/// part's one), and for buffer objects, a part that also lies in a smaller
-/// buffer object. The slot then showed a copy nothing brought up to date,
-/// and what shaders wrote through it was looked for in the other copy.
+/// Table draws use the whole buffer's extent to match descriptor creation
+/// even when the view covers only part of it.
 pub(crate) fn buffer_copy(view: &View) -> Option<(std::sync::Arc<crate::shadow::Shadow>, u64, u64)> {
     let (address, len) = buffer_range(view)?;
     if len == 0 {
@@ -1848,7 +1873,30 @@ fn unordered_range(base: u64, words: &[u32; 10]) -> Option<(u64, u64)> {
 }
 
 /// The host resource a slot made by [`make`] views, if any.
-type Kept = Option<ID3D12Resource>;
+type Kept = Option<Binding>;
+
+struct Binding {
+    _resource: ID3D12Resource,
+    shadow: Option<Arc<crate::shadow::Shadow>>,
+}
+
+impl From<ID3D12Resource> for Binding {
+    fn from(resource: ID3D12Resource) -> Self {
+        Self {
+            _resource: resource,
+            shadow: None,
+        }
+    }
+}
+
+impl From<Arc<crate::shadow::Shadow>> for Binding {
+    fn from(shadow: Arc<crate::shadow::Shadow>) -> Self {
+        Self {
+            _resource: shadow.buffer.clone(),
+            shadow: Some(shadow),
+        }
+    }
+}
 
 /// A structured buffer view (`first`, `count` elements of `stride` bytes,
 /// `offset` bytes into its host copy) as a raw view of the same bytes:
@@ -1972,7 +2020,7 @@ fn buffer_srv(
         host.device
             .CreateShaderResourceView(&shadow.buffer, Some(&desc), at)
     };
-    Some(Some(shadow.buffer.clone()))
+    Some(Some(shadow.into()))
 }
 
 /// An unordered access view of title buffer memory at `address` (`len`
@@ -2048,7 +2096,7 @@ fn buffer_uav(
         host.device
             .CreateUnorderedAccessView(&shadow.buffer, None::<&ID3D12Resource>, Some(&desc), at)
     };
-    Some(Some(shadow.buffer.clone()))
+    Some(Some(shadow.into()))
 }
 
 /// Whether the host can make a shader (or unordered access) view of
@@ -2204,7 +2252,7 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
             };
             // SAFETY: a slot of our heap; the range lies in the host copy.
             unsafe { device.CreateConstantBufferView(Some(&desc), at) };
-            Some(Some(shadow.buffer.clone()))
+            Some(Some(shadow.buffer.clone().into()))
         }
         View::Shader(resource, desc) => {
             let resource = *resource as crate::object::This;
@@ -2245,7 +2293,7 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
                         at,
                     )
                 };
-                Some(Some(texture.clone()))
+                Some(Some(texture.clone().into()))
             } else if let (Some((data, len)), Some(desc)) =
                 (crate::resource::buffer_bytes(resource), desc)
             {
@@ -2307,7 +2355,7 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
                     at,
                 )
             };
-            Some(Some(texture.clone()))
+            Some(Some(texture.clone().into()))
         }
         View::Sampler(words) => {
             // SAFETY: 13 words in the host's layout.
@@ -2561,6 +2609,39 @@ fn null_view(at: D3D12_CPU_DESCRIPTOR_HANDLE) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_buffer_refresh_keeps_the_shadow_bound_to_the_slot() {
+        let Some(heap) = HostHeap::new(false, 8) else {
+            eprintln!("no D3D12 device; skipped");
+            return;
+        };
+        let address = 0x7c_6100_0000;
+        let width = 63 << 10;
+        let mut resource = [0; 14];
+        (resource[0], resource[4]) = (1, width as u32);
+        let mut desc = [0; 16];
+        (desc[0], desc[1], desc[6], desc[8]) = (39, 1, 4, 1);
+        (desc[10], desc[11]) = (address as u32, (address >> 32) as u32);
+        let mut slot = [0u32; 8];
+        let handle = slot.as_mut_ptr() as u64;
+        super::super::record(handle, View::Placed(false, resource, desc));
+        crate::shadow::register(1, address, width);
+        let refresh = || heap.mirror_indexed_buffer(0, handle);
+        let (first, _, _) = refresh().unwrap();
+        crate::shadow::register(2, address, width);
+        let new = crate::shadow::find(address, width).unwrap();
+        let (current, at, len) = refresh().unwrap();
+        desc[4] = (width / 4) as u32;
+        super::super::record(handle, View::Placed(false, resource, desc));
+        let padded = refresh();
+        crate::shadow::unregister(2, address);
+        crate::shadow::unregister(1, address);
+        assert_ne!(first.id(), new.id());
+        assert_eq!(current.id(), first.id());
+        assert_eq!((at, len), (address, 16));
+        assert!(padded.is_none());
+    }
 
     /// Only typed integer buffer views carry the integer-kind metadata.
     #[test]

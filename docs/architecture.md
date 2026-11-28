@@ -37,9 +37,12 @@ aliases under the same cache lock; descriptors retain the buffer identity
 selected for their range.
 
 Each host descriptor heap owns the buffer references from its descriptor
-sweep. The sweep caches the combined address range for each buffer and
-recalculates it when an edge view moves inward or disappears. The existing
-periodic revalidation still revisits all buffer descriptors.
+sweep. Resident slots retain their bound buffers, so an overlapping title
+allocation cannot redirect a refresh to a different host copy. Unbound
+slots need no entry in the resource table. The sweep caches the combined
+address range for each buffer and recalculates it when an edge view moves
+inward or disappears. Periodic revalidation still revisits all buffer
+descriptors.
 
 State-transition command lists and their allocators go back to a bounded
 shared pool when the owning list resets after GPU completion.
