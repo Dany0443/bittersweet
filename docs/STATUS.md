@@ -149,6 +149,16 @@ spent on buffer copies. Starting memory also differed from the previous
 runs. This establishes that the file-backed path reached the world and
 leaves its performance and visual effects unresolved.
 
+After warming translations and finding 2,426 previously used pipelines
+in the driver library, the disk-backed build reached the same 155-second
+limit without a memory stop or a logged GPU fault. Its 16 world samples
+had a median of 0.9 fps, with about 725 ms per frame spent on buffer copies
+and 49 ms on the GPU. The world samples reported zero pending pipelines.
+The card reached 5,671 MiB of VRAM and 17% median utilization in the world.
+A late frame showed the character, buildings and other figures, with
+dark materials and visible rendering artifacts. The disk-backed option
+remains experimental.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
