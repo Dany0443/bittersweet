@@ -47,6 +47,10 @@ descriptors.
 State-transition command lists and their allocators go back to a bounded
 shared pool when the owning list resets after GPU completion.
 
+The optional GPU upload path applies to texture staging and command-list
+scratch. It checks D3D12 upload heap support and the local memory budget
+before allocating. Title buffer shadows still use writable shared memory.
+
 The experimental native compute entry point reads a console pipeline
 description and wraps its program in an internal shader container. This
 reuses the existing shader translator and pipeline cache. It rejects

@@ -123,6 +123,10 @@ already protected by the runtime.
 The renderer shares completed state-transition command lists. Set
 `VICTORY_PRELUDE_POOL=0` to compare against per-list allocation.
 
+`VICTORY_GPU_UPLOAD=1` tests VRAM-backed texture staging and command-list
+scratch on GPUs that support upload heaps in VRAM. The runtime falls back
+to system-memory uploads when the local GPU budget is tight.
+
 ## Details
 
 [Runtime status](docs/STATUS.md) · [Architecture](docs/architecture.md) ·

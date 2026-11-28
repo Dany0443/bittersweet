@@ -83,6 +83,13 @@ tests. The warmed title run started with 1,121 MiB of free swap, reached
 zero and exited during world loading after 42 seconds. It produced no
 world sample, and the logs identify neither a GPU fault nor an exit cause.
 
+A 256 MiB synthetic upload on the RX 7600 under Proton stayed in shared
+memory with either setting of `no_upload_hvv`. An explicit GPU upload
+heap placed the full 256 MiB in VRAM. Filling it from the CPU took about
+59 to 61 ms, compared with 26 to 27 ms for ordinary upload memory.
+The GPU copy readback passed. The VRAM path is opt-in for texture staging
+and command-list scratch while its gameplay impact is assessed.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented

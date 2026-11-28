@@ -1978,7 +1978,7 @@ fn take_chunk(host: &Host, size: u64) -> Option<Chunk> {
         ALIVE[5].fetch_add(1, Ordering::Relaxed);
         return Some(chunk);
     }
-    let (buffer, data) = host.upload_buffer(size)?;
+    let (buffer, data) = host.upload_buffer_prefer_local(size)?;
     name(&buffer, || "list scratch".into());
     // SAFETY: a live buffer.
     let gpu = unsafe { buffer.GetGPUVirtualAddress() };
@@ -6959,10 +6959,58 @@ impl Host {
     }
 
     pub(crate) fn upload_buffer(&self, size: u64) -> Option<(ID3D12Resource, *mut u8)> {
+        self.upload_buffer_with(size, D3D12_HEAP_TYPE_UPLOAD)
+            .inspect_err(|e| tracing::warn!(error = %e, size, "no upload buffer"))
+            .ok()
+    }
+
+    pub(crate) fn upload_buffer_prefer_local(
+        &self,
+        size: u64,
+    ) -> Option<(ID3D12Resource, *mut u8)> {
+        static ON: OnceLock<bool> = OnceLock::new();
+        if *ON.get_or_init(|| std::env::var_os("VICTORY_GPU_UPLOAD").is_some_and(|v| v == "1"))
+            && size >= 256 << 10
+            && self.gpu_upload_supported()
+            && let Some([budget, used, ..]) = self.video_memory()
+            && used.saturating_add(size) <= budget / 10 * 8
+            && let Ok(buffer) = self.upload_buffer_with(size, D3D12_HEAP_TYPE_GPU_UPLOAD)
+        {
+            static LOGGED: std::sync::Once = std::sync::Once::new();
+            LOGGED.call_once(|| {
+                tracing::info!("using VRAM for eligible upload buffers (VICTORY_GPU_UPLOAD=1)");
+            });
+            return Some(buffer);
+        }
+        self.upload_buffer(size)
+    }
+
+    fn gpu_upload_supported(&self) -> bool {
+        static SUPPORTED: OnceLock<bool> = OnceLock::new();
+        *SUPPORTED.get_or_init(|| {
+            let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS16::default();
+            // SAFETY: the feature query writes the corresponding options structure.
+            unsafe {
+                self.device.CheckFeatureSupport(
+                    D3D12_FEATURE_D3D12_OPTIONS16,
+                    (&raw mut options).cast(),
+                    size_of_val(&options) as u32,
+                )
+            }
+            .is_ok()
+                && options.GPUUploadHeapSupported.as_bool()
+        })
+    }
+
+    fn upload_buffer_with(
+        &self,
+        size: u64,
+        heap_type: D3D12_HEAP_TYPE,
+    ) -> windows::core::Result<(ID3D12Resource, *mut u8)> {
         MADE[0].fetch_add(1, Ordering::Relaxed);
         MADE[1].fetch_add(size, Ordering::Relaxed);
         let heap = D3D12_HEAP_PROPERTIES {
-            Type: D3D12_HEAP_TYPE_UPLOAD,
+            Type: heap_type,
             ..Default::default()
         };
         let desc = D3D12_RESOURCE_DESC {
@@ -6981,27 +7029,20 @@ impl Host {
         let mut buffer: Option<ID3D12Resource> = None;
         let mut data = std::ptr::null_mut();
         // SAFETY: plain creation and mapping of an upload buffer.
-        let made = unsafe {
-            self.device
-                .CreateCommittedResource(
-                    &heap,
-                    D3D12_HEAP_FLAG_NONE,
-                    &desc,
-                    D3D12_RESOURCE_STATE_GENERIC_READ,
-                    None,
-                    &mut buffer,
-                )
-                .and_then(|()| {
-                    let b = buffer.as_ref().ok_or_else(windows::core::Error::empty)?;
-                    b.Map(0, None, Some(&mut data))
-                })
-        };
-        match made {
-            Ok(()) => Some((buffer?, data.cast())),
-            Err(e) => {
-                tracing::warn!(error = %e, size, "no upload buffer");
-                None
-            }
+        unsafe {
+            self.device.CreateCommittedResource(
+                &heap,
+                D3D12_HEAP_FLAG_NONE,
+                &desc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                None,
+                &mut buffer,
+            )?;
+            let buffer = buffer.ok_or_else(windows::core::Error::empty)?;
+            let write_only = D3D12_RANGE { Begin: 0, End: 0 };
+            let read = (heap_type == D3D12_HEAP_TYPE_GPU_UPLOAD).then_some(&raw const write_only);
+            buffer.Map(0, read, Some(&mut data))?;
+            Ok((buffer, data.cast()))
         }
     }
 }
@@ -7337,6 +7378,35 @@ fn capture_composed(
 #[cfg(test)]
 mod layer_tests {
     use super::{fractions, texels};
+
+    #[test]
+    fn gpu_upload_stages_bytes_for_copy() {
+        use super::*;
+        let Some(host) = host().filter(|host| host.gpu_upload_supported()) else {
+            eprintln!("GPU upload heaps unavailable; skipped");
+            return;
+        };
+        let (source, data) = host
+            .upload_buffer_with(256 << 10, D3D12_HEAP_TYPE_GPU_UPLOAD)
+            .unwrap();
+        let back = host.read_back_buffer(16).unwrap();
+        let commands = host.new_list().unwrap();
+        let expected = [17u32, 23, 31, 59];
+        // SAFETY: both mappings cover the 16 copied bytes.
+        unsafe {
+            data.cast::<u32>()
+                .copy_from_nonoverlapping(expected.as_ptr(), expected.len());
+            commands.list.CopyBufferRegion(&back, 0, &source, 0, 16);
+        }
+        commands.close();
+        host.execute(&[&commands]);
+        unsafe {
+            let mut data = std::ptr::null_mut();
+            back.Map(0, None, Some(&mut data)).unwrap();
+            assert_eq!(std::slice::from_raw_parts(data.cast::<u32>(), 4), expected);
+            back.Unmap(0, None);
+        }
+    }
 
     #[test]
     fn present_layer_pipelines_have_explicit_root_signatures() {
