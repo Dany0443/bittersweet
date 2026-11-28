@@ -296,6 +296,12 @@ The page-view notifications adapt [Scarlight PR #146](https://github.com/pablogo
 head `db2413d5d9bb070cf090982df7fc010c62850910`. This port uses the
 existing xmem mapping lock, write guards, and per-heap texture history.
 
+## Guarded view queries
+
+The optional shortcut for armed views follows [victory-fork PR #670](https://github.com/fxceless/victory-fork/pull/670)
+at `05d37755f094b1956b4faaa13be701ff8e571d3a`. It checks the armed block
+under the guard lock and keeps the kernel query for unknown or absent blocks.
+
 ## Screen-probe ambient lighting
 
 The constant indirect-light fallback adapts the screen-probe binding in

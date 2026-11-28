@@ -382,35 +382,43 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
     if let Some(cached) = j.cached(first, last) {
         return Some(cached);
     }
-    let mut count = (last - first) * PAGE / KERNEL_PAGE;
-    j.found.resize(count.max(j.found.len()), 0);
-    let mut granularity = 0;
     #[cfg(feature = "diagnostics")]
     let started = std::time::Instant::now();
-    // SAFETY: the answer buffer holds `count` entries.
-    let failed = unsafe {
-        GetWriteWatch(
-            WRITE_WATCH_FLAG_RESET,
-            (first * PAGE) as *const _,
-            (last - first) * PAGE,
-            j.found.as_mut_ptr().cast(),
-            &mut count,
-            &mut granularity,
-        )
-    } != 0;
-    let guarded = if failed {
-        count = 0;
-        if !guarded {
+    static FAST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let armed = if guarded
+        && *FAST.get_or_init(|| {
+            std::env::var_os("VICTORY_GUARD_FAST").is_some_and(|v| v == "1") && !ask_guards()
+        }) {
+        timed_guard(|| guards().read_if_armed(first, last))
+    } else {
+        None
+    };
+    let (count, guarded) = if let Some(written) = armed {
+        #[cfg(feature = "diagnostics")]
+        crate::copystat::add(crate::copystat::C::WatchKnownViews, 1);
+        (0, written)
+    } else {
+        let mut count = (last - first) * PAGE / KERNEL_PAGE;
+        j.found.resize(count.max(j.found.len()), 0);
+        let mut granularity = 0;
+        // SAFETY: the answer buffer holds `count` entries.
+        let failed = unsafe {
+            GetWriteWatch(
+                WRITE_WATCH_FLAG_RESET,
+                (first * PAGE) as *const _,
+                (last - first) * PAGE,
+                j.found.as_mut_ptr().cast(),
+                &mut count,
+                &mut granularity,
+            )
+        } != 0;
+        if !failed {
+            (count, Vec::new())
+        } else if guarded {
+            (0, timed_guard(|| guard(first * PAGE, last * PAGE))?)
+        } else {
             return None;
         }
-        #[cfg(feature = "diagnostics")]
-        let guarding = std::time::Instant::now();
-        let written = guard(first * PAGE, last * PAGE);
-        #[cfg(feature = "diagnostics")]
-        crate::copystat::add(crate::copystat::C::GuardUs, guarding.elapsed().as_micros() as u64);
-        written?
-    } else {
-        Vec::new()
     };
     #[cfg(feature = "diagnostics")]
     {
@@ -457,6 +465,23 @@ fn guards() -> std::sync::MutexGuard<'static, Guards> {
     GUARDS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+fn ask_guards() -> bool {
+    static ASK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ASK.get_or_init(|| std::env::var_os("VICTORY_GUARD_ASK").is_some_and(|v| v == "1"))
+}
+
+fn timed_guard(read: impl FnOnce() -> Option<Vec<usize>>) -> Option<Vec<usize>> {
+    #[cfg(feature = "diagnostics")]
+    let started = std::time::Instant::now();
+    let written = read();
+    #[cfg(feature = "diagnostics")]
+    crate::copystat::add(
+        crate::copystat::C::GuardUs,
+        started.elapsed().as_micros() as u64,
+    );
+    written
+}
+
 /// For view memory: the pages of `[start, end)`'s blocks written since
 /// they were last guarded (all of a block's pages), guarding them again
 /// before the caller copies them. `None` if the memory is not a view.
@@ -468,8 +493,7 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
     // pages: 0.6 ms for the title's 174 MB heap, 16 times a frame, and most
     // of the 68 ms a frame of "guards" (run 58).
     // `VICTORY_GUARD_ASK=1` asks every time, as before.
-    static ASK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let known = !*ASK.get_or_init(|| std::env::var_os("VICTORY_GUARD_ASK").is_some_and(|v| v == "1")) && {
+    let known = !ask_guards() && {
         let g = guards();
         let first = start / BLOCK;
         g.protected.contains(&first) || g.absent.contains(&first)
@@ -478,10 +502,24 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
         return None;
     }
     install();
-    let mut g = guards();
+    Some(read_guarded(
+        &mut guards(),
+        start / BLOCK,
+        end.div_ceil(BLOCK),
+    ))
+}
+
+impl Guards {
+    fn read_if_armed(&mut self, first: usize, last: usize) -> Option<Vec<usize>> {
+        self.protected
+            .contains(&first)
+            .then(|| read_guarded(self, first, last))
+    }
+}
+
+fn read_guarded(g: &mut Guards, first: usize, last: usize) -> Vec<usize> {
     let mut written = Vec::new();
     let mut run: Option<usize> = None;
-    let (first, last) = (start / BLOCK, end.div_ceil(BLOCK));
     // The range's clean blocks, in order: read off the set in one pass,
     // not looked up one block at a time. A frame asks about some 10 GB of
     // view memory, 150,000 blocks, nearly all clean: the lookups were most
@@ -490,7 +528,7 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
     let clean: Vec<usize> = g.clean.range(first..last).copied().collect();
     if clean.len() == last - first {
         // Nothing written, mapped or new since the range was last taken.
-        return Some(written);
+        return written;
     }
     let mut next_clean = 0;
     let mut uncommitted_until = first;
@@ -522,10 +560,10 @@ fn guard(start: usize, end: usize) -> Option<Vec<usize>> {
             }
         }
         if let Some(from) = run.take() {
-            protect(&mut g, from, block);
+            protect(g, from, block);
         }
     }
-    Some(written)
+    written
 }
 
 /// Whether `[start, end)` is view memory. The title's views lie in
@@ -949,6 +987,21 @@ mod tests {
         MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
     };
     const MEM_WRITE_WATCH: u32 = 0x20_0000;
+
+    #[test]
+    fn a_guarded_query_reuses_only_armed_views() {
+        let mut g = Guards {
+            protected: BTreeSet::from([1, 2]),
+            clean: BTreeSet::from([1, 2]),
+            absent: BTreeSet::from([3]),
+        };
+        assert_eq!(g.read_if_armed(1, 3), Some(vec![]));
+        g.clean.remove(&2);
+        assert_eq!(g.read_if_armed(1, 3), Some(vec![2]));
+        assert_eq!(g.read_if_armed(1, 3), Some(vec![]));
+        assert_eq!(g.read_if_armed(3, 4), None);
+        assert_eq!(g.read_if_armed(4, 5), None);
+    }
 
     #[test]
     fn cached_queries_include_writes_after_the_ahead_ask() {
