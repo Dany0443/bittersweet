@@ -512,6 +512,8 @@ Repeated host command lists are submitted in ordered, completed batches
 to protect their reused prelude allocators. This is a local correction.
 Host submission waits now require a completed fence before resources
 are retired. This is a local correction.
+Mesh scratch transitions back to write state on its next use. This local
+change avoids transitions after the last mesh draw in a command list.
 
 The compute fallback retains its declared output layout even when native
 mesh output limits would require smaller counts. This local fix follows

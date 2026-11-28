@@ -2173,7 +2173,6 @@ impl State {
         }
         self.mesh_scissor(list, false);
         self.set_topology(list, self.topology);
-        list.buffer_state(&buffer, crate::host::BUFFER_WRITE);
         DRAWN.fetch_add(1, Ordering::Relaxed);
         true
     }
@@ -2980,8 +2979,6 @@ impl State {
         }
         self.mesh_scissor(list, false);
         self.set_topology(list, self.topology);
-        list.buffer_state(&data, crate::host::BUFFER_WRITE);
-        list.buffer_state(&commands, crate::host::BUFFER_WRITE);
         DRAWN.fetch_add(1, Ordering::Relaxed);
         true
     }

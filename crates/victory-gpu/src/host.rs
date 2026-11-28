@@ -1077,6 +1077,27 @@ mod tests {
     }
 
     #[test]
+    fn mesh_scratch_transitions_back_to_write_only_when_reused() {
+        let mut s = BufferStates::default();
+        let indirect = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT.0 as u32;
+        let mesh_read = (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE.0
+            | D3D12_RESOURCE_STATE_INDEX_BUFFER.0) as u32;
+        s.next_command();
+        assert_eq!(s.update(1, 'c', BUFFER_WRITE), None);
+        s.next_command();
+        assert_eq!(s.update(1, 'c', indirect), Some(BUFFER_WRITE));
+        assert_eq!(s.update(2, 'm', BUFFER_WRITE), None);
+        s.next_command();
+        assert_eq!(s.update(2, 'm', mesh_read), Some(BUFFER_WRITE));
+        let last: Vec<_> = s.lasts().map(|(r, state)| (*r, state)).collect();
+        assert!(last.contains(&('c', indirect)));
+        assert!(last.contains(&('m', mesh_read)));
+        s.next_command();
+        assert_eq!(s.update(1, 'c', BUFFER_WRITE), Some(indirect));
+        assert_eq!(s.update(2, 'm', BUFFER_WRITE), Some(mesh_read));
+    }
+
+    #[test]
     fn sparse_copies_preserve_islands_and_observe_remaps() {
         use windows_sys::Win32::System::Memory::*;
         const N: usize = 5 << 16;
