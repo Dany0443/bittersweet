@@ -90,6 +90,15 @@ heap placed the full 256 MiB in VRAM. Filling it from the CPU took about
 The GPU copy readback passed. The VRAM path is opt-in for texture staging
 and command-list scratch while its gameplay impact is assessed.
 
+The warmed RX 7600 build used GPU upload heaps and presented the opening
+3D scene at 1280 by 720 internal resolution. Its only world sample was
+1.2 fps with 2,992 draws per frame, and characters still appeared dark.
+The memory monitor stopped it after 45 seconds with no free swap. A run
+of the same executable with GPU uploads disabled started with 556 MiB
+less free swap and exited during world loading after 46 seconds with
+no world sample. Neither logged a GPU fault. These runs establish that
+the new path is used, but leave its gameplay impact unmeasured.
+
 ## Validation: 2026-11-27
 
 The merged RX 5700 build reached the first 3D cutscene and presented
